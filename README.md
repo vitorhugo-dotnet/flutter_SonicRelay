@@ -33,3 +33,9 @@ flutter run \
 ```
 
 Initial routes are `/` (login), `/join`, `/listener`, and `/settings`.
+
+## UI preview
+
+The current app provides a dark Material 3 shell with reusable controls and presentation-only login, session join, listener, and settings screens. Backend authentication, session discovery, and WebRTC audio are intentionally not connected yet.
+
+To capture Android screenshots, run an emulator, start the app with `flutter run`, navigate through the local preview actions, and use the emulator screenshot control. Recommended captures are the login screen and the listener dashboard at a common phone size such as 1080 × 2400.

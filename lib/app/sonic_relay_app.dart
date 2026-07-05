@@ -11,7 +11,7 @@ class SonicRelayApp extends StatelessWidget {
     return MaterialApp.router(
       title: 'SonicRelay',
       debugShowCheckedModeBanner: false,
-      theme: AppTheme.light,
+      theme: AppTheme.dark,
       routerConfig: appRouter,
     );
   }

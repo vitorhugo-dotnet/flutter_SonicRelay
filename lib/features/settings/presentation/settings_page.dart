@@ -1,15 +1,118 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 
-import '../../../core/widgets/feature_scaffold.dart';
+import '../../../app/theme/app_colors.dart';
+import '../../../app/theme/app_spacing.dart';
+import '../../../core/widgets/connection_badge.dart';
+import '../../../core/widgets/sonic_button.dart';
+import '../../../core/widgets/sonic_card.dart';
 
 class SettingsPage extends StatelessWidget {
   const SettingsPage({super.key});
 
   @override
   Widget build(BuildContext context) {
-    return const FeatureScaffold(
-      title: 'Settings',
-      description: 'Viewer preferences will be configured here.',
+    return Scaffold(
+      appBar: AppBar(title: const Text('Settings')),
+      body: SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(AppSpacing.lg),
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 620),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text(
+                    'Viewer preferences',
+                    style: Theme.of(context).textTheme.headlineMedium,
+                  ),
+                  const SizedBox(height: AppSpacing.sm),
+                  Text(
+                    'Integration settings will become available in a future release.',
+                    style: Theme.of(context).textTheme.bodyMedium,
+                  ),
+                  const SizedBox(height: AppSpacing.lg),
+                  const SonicCard(
+                    child: Column(
+                      children: [
+                        _SettingsRow(
+                          icon: Icons.cloud_outlined,
+                          title: 'API environment',
+                          subtitle: 'Not connected',
+                          trailing: ConnectionBadge(
+                            label: 'Preview',
+                            status: ConnectionStatus.connecting,
+                          ),
+                        ),
+                        Divider(height: AppSpacing.xl),
+                        _SettingsRow(
+                          icon: Icons.dark_mode_outlined,
+                          title: 'Appearance',
+                          subtitle: 'Dark theme',
+                        ),
+                        Divider(height: AppSpacing.xl),
+                        _SettingsRow(
+                          icon: Icons.info_outline_rounded,
+                          title: 'Status',
+                          subtitle: 'UI shell only',
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: AppSpacing.xl),
+                  SonicButton(
+                    label: 'Log out',
+                    icon: Icons.logout_rounded,
+                    isSecondary: true,
+                    onPressed: () => context.go('/'),
+                  ),
+                  const SizedBox(height: AppSpacing.md),
+                  const Text(
+                    'SonicRelay mobile viewer · UI preview',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: AppColors.textSecondary),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SettingsRow extends StatelessWidget {
+  const _SettingsRow({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    this.trailing,
+  });
+
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final Widget? trailing;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Icon(icon, color: AppColors.accent),
+        const SizedBox(width: AppSpacing.md),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(title, style: Theme.of(context).textTheme.titleMedium),
+              Text(subtitle, style: Theme.of(context).textTheme.bodyMedium),
+            ],
+          ),
+        ),
+        ?trailing,
+      ],
     );
   }
 }
