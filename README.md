@@ -13,7 +13,7 @@ The app uses Feature Driven Development:
 - `lib/core`: reusable technical infrastructure such as HTTP, secure storage, WebSocket, and WebRTC adapters.
 - `lib/features`: user-facing capabilities. Each feature owns its `data`, `domain`, and `presentation` boundaries when applicable.
 
-Riverpod provides state and dependency composition, go_router handles navigation, Dio provides HTTP infrastructure, and sensitive tokens will be stored with flutter_secure_storage. The flutter_webrtc package is installed, but real media behavior is intentionally not part of this foundation.
+Riverpod provides state and dependency composition, go_router handles guarded navigation, Dio provides HTTP infrastructure, and sensitive tokens are stored only through a flutter_secure_storage-backed abstraction. The flutter_webrtc package is installed, but real media behavior is intentionally not part of this foundation.
 
 ## Local development
 
@@ -32,10 +32,26 @@ flutter run \
   --dart-define=SONIC_RELAY_WS_URL=wss://api.example.com
 ```
 
-Initial routes are `/` (login), `/join`, `/listener`, and `/settings`.
+Routes are `/login`, `/join`, `/listener`, and `/settings`. All routes except `/login` are protected; startup restores a stored session before deciding which route to show.
+
+## Backend authentication contract
+
+The configured API must expose:
+
+```text
+POST /auth/register
+POST /auth/login
+POST /auth/refresh
+POST /auth/logout
+GET  /auth/me
+```
+
+Login uses the ASP.NET Identity bearer-token contract. Access and refresh tokens are persisted through `TokenStorage` backed by `flutter_secure_storage`; they are never written to SharedPreferences or logs. A `401` response triggers one refresh attempt and retries the original request. If refresh fails, local tokens are cleared and the app returns to `/login`.
+
+`SONIC_RELAY_API_URL` is required for a deployed backend. The localhost value in `AppConfig` is intended only for local development; production URLs are not embedded in the app.
 
 ## UI preview
 
-The current app provides a dark Material 3 shell with reusable controls and presentation-only login, session join, listener, and settings screens. Backend authentication, session discovery, and WebRTC audio are intentionally not connected yet.
+The current app provides a dark Material 3 shell with reusable controls and connected token authentication. Session discovery and WebRTC audio are not connected yet.
 
 To capture Android screenshots, run an emulator, start the app with `flutter run`, navigate through the local preview actions, and use the emulator screenshot control. Recommended captures are the login screen and the listener dashboard at a common phone size such as 1080 × 2400.

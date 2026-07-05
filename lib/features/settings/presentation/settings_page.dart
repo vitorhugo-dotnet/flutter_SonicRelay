@@ -1,17 +1,18 @@
 import 'package:flutter/material.dart';
-import 'package:go_router/go_router.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../app/theme/app_colors.dart';
 import '../../../app/theme/app_spacing.dart';
 import '../../../core/widgets/connection_badge.dart';
 import '../../../core/widgets/sonic_button.dart';
 import '../../../core/widgets/sonic_card.dart';
+import '../../auth/presentation/login_view_model.dart';
 
-class SettingsPage extends StatelessWidget {
+class SettingsPage extends ConsumerWidget {
   const SettingsPage({super.key});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     return Scaffold(
       appBar: AppBar(title: const Text('Settings')),
       body: SafeArea(
@@ -65,7 +66,8 @@ class SettingsPage extends StatelessWidget {
                     label: 'Log out',
                     icon: Icons.logout_rounded,
                     isSecondary: true,
-                    onPressed: () => context.go('/'),
+                    onPressed: () =>
+                        ref.read(authViewModelProvider.notifier).logout(),
                   ),
                   const SizedBox(height: AppSpacing.md),
                   const Text(

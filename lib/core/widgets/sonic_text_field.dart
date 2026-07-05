@@ -9,6 +9,7 @@ class SonicTextField extends StatelessWidget {
     this.obscureText = false,
     this.prefixIcon,
     this.textCapitalization = TextCapitalization.none,
+    this.errorText,
     super.key,
   });
 
@@ -19,6 +20,7 @@ class SonicTextField extends StatelessWidget {
   final bool obscureText;
   final IconData? prefixIcon;
   final TextCapitalization textCapitalization;
+  final String? errorText;
 
   @override
   Widget build(BuildContext context) {
@@ -31,6 +33,7 @@ class SonicTextField extends StatelessWidget {
         labelText: label,
         hintText: hintText,
         prefixIcon: prefixIcon == null ? null : Icon(prefixIcon),
+        errorText: errorText,
       ),
     );
   }
