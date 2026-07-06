@@ -34,6 +34,27 @@ flutter run \
 
 Routes are `/login`, `/join`, `/session/waiting`, `/listener`, and `/settings`. All routes except `/login` are protected; startup restores a stored session before deciding which route to show.
 
+## Continuous integration
+
+`.github/workflows/flutter-ci.yml` runs on every push and pull request to `main`. It pins Flutter `3.38.1` (stable) via [`subosito/flutter-action`](https://github.com/subosito/flutter-action) with dependency caching, and splits the work into three independent jobs so a red job can be retried on its own:
+
+| Job | Command |
+| --- | --- |
+| `analyze` | `flutter analyze` |
+| `test` | `flutter test` |
+| `build-android` | `flutter build apk --release`, then uploads `app-release.apk` as an artifact |
+
+The release build signs with the debug keys (see `android/app/build.gradle.kts`), so CI needs **no signing keys and no secrets**. No app-store deployment happens here.
+
+Run the same checks locally before pushing:
+
+```sh
+flutter pub get
+flutter analyze
+flutter test
+flutter build apk --release
+```
+
 ## Session join flow
 
 An authenticated viewer enters the temporary code shown by the Windows publisher on `/join`. The app trims and normalizes the code to uppercase, validates its shape locally, and requires the backend-issued viewer device UUID before sending:
