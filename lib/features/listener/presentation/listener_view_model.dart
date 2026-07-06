@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../app/di/app_providers.dart';
+import '../../sessions/domain/stream_session.dart';
 import '../../signaling/data/signaling_client.dart';
 import '../../signaling/domain/signaling_message.dart';
 import '../data/webrtc_receiver_service.dart';
@@ -82,6 +83,15 @@ class ListenerViewModel extends Notifier<ListenerState> {
       stats: _receiver.statsValue,
     );
   }
+
+  /// Opens the signaling socket for [session]. Inbound messages are already
+  /// routed to the WebRTC receiver (wired in [build]), so once connected the
+  /// publisher handshake (`viewer.ready` -> offer -> answer) proceeds on its
+  /// own. Throws if the socket cannot be opened.
+  Future<void> connect({
+    required StreamSession session,
+    required String deviceId,
+  }) => _signaling.connect(session: session, deviceId: deviceId);
 
   /// Leaves the session: tears down the peer connection/audio and closes the
   /// signaling socket.
