@@ -136,6 +136,20 @@ void main() {
     expect(states, contains(ListenerConnectionState.waitingForOffer));
   });
 
+  test('publisher.ready replies with viewer.ready to the publisher', () async {
+    final outbound = <OutboundSignal>[];
+    service.outboundSignals.listen(outbound.add);
+
+    await service.handleSignal(
+      _message(SignalingMessageType.publisherReady, from: 'publisher-1'),
+    );
+    await Future<void>.delayed(Duration.zero);
+
+    final ready = outbound.single;
+    expect(ready.type, SignalingMessageType.viewerReady);
+    expect(ready.to, 'publisher-1');
+  });
+
   test('offer sets remote description, answers, and emits webrtc.answer', () async {
     final outbound = <OutboundSignal>[];
     service.outboundSignals.listen(outbound.add);

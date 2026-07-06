@@ -94,7 +94,6 @@ class SignalingClient {
         _connectionStateController.add(SignalingConnectionState.connecting);
       case WebSocketConnectionState.connected:
         _connectionStateController.add(SignalingConnectionState.connected);
-        _sendViewerReady();
       case WebSocketConnectionState.reconnecting:
         _connectionStateController.add(SignalingConnectionState.reconnecting);
       case WebSocketConnectionState.disconnected:
@@ -118,13 +117,11 @@ class SignalingClient {
   }
 
   /// Sends a signaling [type] with [payload] over the current session. Used by
-  /// the WebRTC layer to forward `webrtc.answer` and local `webrtc.ice_candidate`
-  /// messages. No-op if there is no active session.
+  /// the WebRTC layer to forward `viewer.ready`, `webrtc.answer` and local
+  /// `webrtc.ice_candidate` messages, each addressed to a publisher participant.
+  /// No-op if there is no active session.
   void send(SignalingMessageType type, Map<String, Object?> payload, {String? to}) =>
       _send(type, payload, to: to);
-
-  void _sendViewerReady() =>
-      _send(SignalingMessageType.viewerReady, const {});
 
   void _sendPong(SignalingMessage ping) =>
       _send(SignalingMessageType.pong, const {}, to: ping.from);

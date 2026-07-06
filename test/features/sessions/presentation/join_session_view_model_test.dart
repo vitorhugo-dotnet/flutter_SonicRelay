@@ -8,10 +8,7 @@ import 'package:sonic_relay/features/sessions/presentation/join_session_view_mod
 
 final joinedSession = StreamSession(
   sessionId: 'session-1',
-  role: 'viewer',
-  signalingUrl: Uri.parse(
-    'wss://stream.example/ws/signaling?sessionId=session-1',
-  ),
+  signalingUrl: Uri.parse('wss://stream.example/ws/signaling'),
 );
 
 class FakeSessionsRepository implements SessionsRepository {

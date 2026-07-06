@@ -1,5 +1,6 @@
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:sonic_relay/app/env/app_config.dart';
 import 'package:sonic_relay/features/devices/data/devices_repository.dart';
 import 'package:sonic_relay/features/devices/domain/device.dart';
 import 'package:sonic_relay/features/sessions/data/dto/join_session_request.dart';
@@ -15,11 +16,7 @@ class FakeSessionsApi implements SessionsApi {
   Future<JoinSessionResponse> join(JoinSessionRequest request) async {
     this.request = request;
     if (error case final value?) throw value;
-    return const JoinSessionResponse(
-      sessionId: 'session-1',
-      role: 'viewer',
-      signalingUrl: 'wss://stream.example/ws/signaling?sessionId=session-1',
-    );
+    return const JoinSessionResponse(sessionId: 'session-1', status: 'waiting');
   }
 }
 
@@ -57,7 +54,14 @@ void main() {
   setUp(() {
     api = FakeSessionsApi();
     devices = FakeDevicesRepository();
-    repository = SessionsRepository(api: api, devicesRepository: devices);
+    repository = SessionsRepository(
+      api: api,
+      devicesRepository: devices,
+      config: const AppConfig(
+        apiBaseUrl: 'http://api.example',
+        webSocketBaseUrl: 'ws://api.example',
+      ),
+    );
   });
 
   test('joins with normalized code and registered viewer device', () async {
@@ -66,7 +70,7 @@ void main() {
     expect(api.request?.code, 'ABC123');
     expect(api.request?.deviceId, 'viewer-device');
     expect(session.sessionId, 'session-1');
-    expect(session.role, 'viewer');
+    expect(session.signalingUrl, Uri.parse('ws://api.example/ws/signaling'));
     expect(repository.currentSession, same(session));
   });
 

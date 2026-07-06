@@ -54,8 +54,6 @@ class SessionWaitingPage extends ConsumerWidget {
                     style: Theme.of(context).textTheme.titleLarge,
                   ),
                   const SizedBox(height: AppSpacing.sm),
-                  Text('Role: ${session.role}'),
-                  const SizedBox(height: AppSpacing.sm),
                   Text(
                     'Signaling ready: ${session.signalingUrl.host}',
                     overflow: TextOverflow.ellipsis,

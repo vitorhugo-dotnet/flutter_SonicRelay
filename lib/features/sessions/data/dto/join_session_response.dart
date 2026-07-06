@@ -1,40 +1,44 @@
+import '../../domain/session_status.dart';
 import '../../domain/stream_session.dart';
 
+/// Parsed body of `POST /api/sessions/join`.
+///
+/// The backend returns a full StreamSession record — `{id, ownerUserId,
+/// sourceDeviceId, status, maxViewers, codeExpiresAt, startedAt, endedAt,
+/// createdAt, code}` — and no signaling URL. Only the fields the viewer needs
+/// are read here; the signaling URL is built by the caller from the configured
+/// WebSocket base URL (see [toDomain]).
 class JoinSessionResponse {
   const JoinSessionResponse({
     required this.sessionId,
-    required this.role,
-    required this.signalingUrl,
+    required this.status,
+    this.code,
   });
 
   factory JoinSessionResponse.fromJson(Map<String, Object?> json) {
-    final sessionId = json['sessionId'];
-    final role = json['role'];
-    final signalingUrl = json['signalingUrl'];
-    if (sessionId is! String ||
-        sessionId.isEmpty ||
-        role is! String ||
-        role.isEmpty ||
-        signalingUrl is! String ||
-        signalingUrl.isEmpty) {
+    final id = json['id'];
+    if (id is! String || id.isEmpty) {
       throw const FormatException('Invalid join session response.');
     }
     return JoinSessionResponse(
-      sessionId: sessionId,
-      role: role,
-      signalingUrl: signalingUrl,
+      sessionId: id,
+      status: json['status'] as String? ?? 'waiting',
+      code: json['code'] as String?,
     );
   }
 
   final String sessionId;
-  final String role;
-  final String signalingUrl;
+  final String status;
+  final String? code;
 
-  StreamSession toDomain() {
-    final uri = Uri.tryParse(signalingUrl);
-    if (uri == null || (uri.scheme != 'ws' && uri.scheme != 'wss')) {
+  StreamSession toDomain(Uri signalingUrl) {
+    if (signalingUrl.scheme != 'ws' && signalingUrl.scheme != 'wss') {
       throw const FormatException('Invalid signaling URL.');
     }
-    return StreamSession(sessionId: sessionId, role: role, signalingUrl: uri);
+    return StreamSession(
+      sessionId: sessionId,
+      signalingUrl: signalingUrl,
+      status: SessionStatus.fromWire(status),
+    );
   }
 }

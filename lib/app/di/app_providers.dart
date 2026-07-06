@@ -83,6 +83,7 @@ final sessionsRepositoryProvider = Provider<SessionsRepository>(
   (ref) => SessionsRepository(
     api: ref.watch(sessionsApiProvider),
     devicesRepository: ref.watch(devicesRepositoryProvider),
+    config: ref.watch(appConfigProvider),
   ),
 );
 

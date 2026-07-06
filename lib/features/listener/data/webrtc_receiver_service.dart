@@ -66,7 +66,16 @@ class WebRtcReceiverService {
   Future<void> handleSignal(SignalingMessage message) async {
     switch (message.type) {
       case SignalingMessageType.sessionJoined:
+        if (_state == ListenerConnectionState.idle) {
+          _setState(ListenerConnectionState.waitingForOffer);
+        }
       case SignalingMessageType.publisherReady:
+        // The publisher announces itself; learn its participant id from the
+        // authenticated `from` and reply `viewer.ready` to it so the publisher
+        // creates its peer connection and sends the offer. `viewer.ready` is a
+        // routed message and the backend rejects it without a `to` recipient.
+        _publisherId = message.from;
+        _emit(SignalingMessageType.viewerReady, const {}, to: message.from);
         if (_state == ListenerConnectionState.idle) {
           _setState(ListenerConnectionState.waitingForOffer);
         }

@@ -83,7 +83,6 @@ void main() {
     await signalingClient.connect(
       session: StreamSession(
         sessionId: 'session-1',
-        role: 'viewer',
         signalingUrl: Uri.parse('wss://stream.example/ws/signaling'),
       ),
       deviceId: 'device-1',

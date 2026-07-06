@@ -1,5 +1,6 @@
 import 'package:dio/dio.dart';
 
+import '../../../app/env/app_config.dart';
 import '../../devices/data/devices_repository.dart';
 import '../domain/stream_session.dart';
 import 'dto/join_session_request.dart';
@@ -26,11 +27,14 @@ class SessionsRepository {
   SessionsRepository({
     required SessionsApi api,
     required DevicesRepository devicesRepository,
+    required AppConfig config,
   }) : _api = api,
-       _devicesRepository = devicesRepository;
+       _devicesRepository = devicesRepository,
+       _config = config;
 
   final SessionsApi _api;
   final DevicesRepository _devicesRepository;
+  final AppConfig _config;
   StreamSession? _currentSession;
 
   StreamSession? get currentSession => _currentSession;
@@ -48,7 +52,7 @@ class SessionsRepository {
       final response = await _api.join(
         JoinSessionRequest(code: code.trim().toUpperCase(), deviceId: deviceId),
       );
-      final session = response.toDomain();
+      final session = response.toDomain(_config.signalingUri);
       _currentSession = session;
       return session;
     } on DioException catch (error) {

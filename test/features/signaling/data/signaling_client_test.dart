@@ -81,7 +81,6 @@ void main() {
     );
     session = StreamSession(
       sessionId: 'session-1',
-      role: 'viewer',
       signalingUrl: Uri.parse(
         'wss://stream.example/ws/signaling?sessionId=session-1',
       ),
@@ -101,15 +100,31 @@ void main() {
     expect(requestedHeaders.single['Authorization'], 'Bearer token-abc');
   });
 
-  test('sends viewer.ready once the socket opens', () async {
+  test('does not auto-send viewer.ready on connect', () async {
+    // `viewer.ready` is a routed message the backend rejects without a `to`
+    // recipient. It is now sent by the WebRTC receiver in reply to
+    // `publisher.ready`, not automatically on socket open.
     await signalingClient.connect(session: session, deviceId: 'device-9');
     await Future<void>.delayed(Duration.zero);
+
+    expect(connection.sent, isEmpty);
+  });
+
+  test('sends a targeted message via send()', () async {
+    await signalingClient.connect(session: session, deviceId: 'device-9');
+    await Future<void>.delayed(Duration.zero);
+
+    signalingClient.send(
+      SignalingMessageType.viewerReady,
+      const {},
+      to: 'publisher-7',
+    );
 
     expect(connection.sent, hasLength(1));
     final sentMessage = _decode(connection.sent.single);
     expect(sentMessage['type'], 'viewer.ready');
     expect(sentMessage['sessionId'], 'session-1');
-    expect(sentMessage['from'], 'device-9');
+    expect(sentMessage['to'], 'publisher-7');
   });
 
   test('replies with pong when the server sends a ping', () async {
@@ -128,8 +143,8 @@ void main() {
     );
     await Future<void>.delayed(Duration.zero);
 
-    expect(connection.sent, hasLength(2));
-    final pong = _decode(connection.sent.last);
+    expect(connection.sent, hasLength(1));
+    final pong = _decode(connection.sent.single);
     expect(pong['type'], 'pong');
     expect(pong['to'], 'server');
   });

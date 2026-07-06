@@ -5,6 +5,12 @@ Mobile viewer for the low-latency SonicRelay audio streaming suite.
 - [Backend](https://github.com/vitorhugo-java/dotnet_SonicRelay)
 - [Windows publisher](https://github.com/vitorhugo-java/windows_SonicRelay)
 
+Integration docs:
+
+- [Flutter architecture](docs/flutter-architecture.md)
+- [Integration flow](docs/integration-flow.md) — the verified end-to-end contract
+- [Troubleshooting](docs/troubleshooting.md)
+
 ## Architecture
 
 The app uses Feature Driven Development:
@@ -66,7 +72,7 @@ An authenticated viewer enters the temporary code shown by the Windows publisher
 }
 ```
 
-The authenticated Dio client calls `POST /api/sessions/join`. A successful response contains `sessionId`, the `viewer` role, and a `ws` or `wss` `signalingUrl`. This context is kept in memory for signaling; it is not persisted. The app then opens `/session/waiting`, where it displays the prepared connection context until a later signaling feature connects the stream.
+The authenticated Dio client calls `POST /api/sessions/join`. The backend responds with the full session record — `{ id, ownerUserId, sourceDeviceId, status, maxViewers, codeExpiresAt, startedAt, endedAt, createdAt, code }`. The response does **not** carry a signaling URL: the client reads `id` as the session id and builds the signaling URL itself from `SONIC_RELAY_WS_URL` + `/ws/signaling`. This context is kept in memory for signaling; it is not persisted. The app then opens `/session/waiting`, where it displays the prepared connection context until a later signaling feature connects the stream.
 
 Invalid or expired codes and full sessions show specific messages. Network failures can be retried, and an unauthorized response clears the authenticated UI state so the router returns to `/login`.
 
@@ -102,7 +108,7 @@ GET  /api/devices/{deviceId}
 
 ## WebSocket signaling contract
 
-After a successful `POST /api/sessions/join`, the viewer opens an authenticated WebSocket connection to the returned `signalingUrl`, with `sessionId` and the viewer's `deviceId` appended as query parameters and the current access token sent as a bearer header:
+After a successful `POST /api/sessions/join`, the viewer opens an authenticated WebSocket connection to `<SONIC_RELAY_WS_URL>/ws/signaling`, with `sessionId` and the viewer's `deviceId` appended as query parameters and the current access token sent as a bearer header:
 
 ```text
 GET /ws/signaling?sessionId={sessionId}&deviceId={deviceId}
@@ -128,7 +134,7 @@ Supported `type` values: `session.joined`, `session.left`, `publisher.ready`, `v
 Transport (`lib/core/websocket`) and signaling (`lib/features/signaling`) are split by responsibility:
 
 - `WebSocketClient` is a reusable, reconnecting JSON-over-WebSocket transport with exponential backoff. It carries no knowledge of the signaling schema.
-- `SignalingClient` builds the authenticated connection URL from the joined session context, sends `viewer.ready` once the socket opens, replies to `ping` with `pong`, maps every frame through `SignalingMessageMapper` into a typed `SignalingMessage`, and closes the socket (without reconnecting) when it receives `session.ended` or the viewer explicitly leaves.
+- `SignalingClient` builds the authenticated connection URL from the joined session context, replies to `ping` with `pong`, maps every frame through `SignalingMessageMapper` into a typed `SignalingMessage`, forwards outbound messages (each addressed to a participant via `to`), and closes the socket (without reconnecting) when it receives `session.ended` or the viewer explicitly leaves. `viewer.ready` is **not** sent on connect — it is a routed message the backend rejects without a `to` recipient, so it is sent in reply to `publisher.ready`, addressed to that message's `from` participant.
 
 Transport (`lib/core/websocket`) and signaling (`lib/features/signaling`) never log SDP or ICE candidate payload bodies.
 
@@ -138,7 +144,7 @@ The Flutter app is the WebRTC **viewer**: it only ever receives a remote audio t
 
 Negotiation runs entirely over the signaling socket described above:
 
-1. `SignalingClient` sends `viewer.ready` once the socket opens.
+1. On `publisher.ready`, the viewer learns the publisher's participant id from the authenticated `from` field and replies `viewer.ready` addressed to it, prompting the publisher to create its peer connection and send the offer.
 2. On `webrtc.offer`, the viewer creates an `RTCPeerConnection`, applies the remote description, creates an answer, sets the local description, and sends `webrtc.answer`.
 3. Local ICE candidates are sent as `webrtc.ice_candidate`; remote candidates are applied as they arrive (candidates received before the offer are buffered and flushed once the remote description is set).
 4. The remote audio track is played through the device's audio output.
@@ -184,3 +190,12 @@ The presentation layer is composed from small reusable widgets under `lib/featur
 The current app provides a dark Material 3 shell with reusable controls, connected token authentication, and a listener dashboard that reflects live WebRTC connection state.
 
 To capture Android screenshots, run an emulator, start the app with `flutter run`, navigate through the local preview actions, and use the emulator screenshot control. Recommended captures are the login screen and the listener dashboard at a common phone size such as 1080 × 2400.
+
+## Known limitations
+
+Surfaced during the 2026-07-06 integration pass (see [docs/integration-flow.md](docs/integration-flow.md)):
+
+- **UI does not yet auto-open signaling.** `/session/waiting` shows the prepared connection context, but wiring join → open-signaling → navigate-to-`/listener` into a single UI flow is not done. The signaling and WebRTC layers are complete and unit-tested behind their view models.
+- **Windows publisher envelope mismatch.** The current [windows_SonicRelay](https://github.com/vitorhugo-java/windows_SonicRelay) signaling envelope serializes a `viewerId` field and sends `publisher.ready` with no recipient, while the backend routes strictly on `to`/`from` participant UUIDs. Until the publisher aligns with the backend protocol, end-to-end audio will not establish. See [docs/troubleshooting.md](docs/troubleshooting.md).
+- **STUN only.** The bundled ICE config uses a single public STUN server and no TURN, so strict/symmetric NATs may fail to establish a media path until a TURN server is configured.
+- **No live E2E in CI.** Verification is static contract alignment plus `flutter analyze`, `flutter test`, and an Android build — not a live audio session against a running backend and publisher.
