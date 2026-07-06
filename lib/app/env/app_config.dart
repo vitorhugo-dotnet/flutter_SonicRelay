@@ -1,17 +1,45 @@
 class AppConfig {
   const AppConfig({required this.apiBaseUrl, required this.webSocketBaseUrl});
 
-  factory AppConfig.fromEnvironment() {
-    return const AppConfig(
-      apiBaseUrl: String.fromEnvironment(
-        'SONIC_RELAY_API_URL',
-        defaultValue: 'http://localhost:5000',
-      ),
-      webSocketBaseUrl: String.fromEnvironment(
-        'SONIC_RELAY_WS_URL',
-        defaultValue: 'ws://localhost:5000',
-      ),
+  /// The default server URL. Can be overridden at build time with
+  /// `--dart-define=SONIC_RELAY_API_URL=...` and at runtime by the user
+  /// through the in-app server URL field.
+  static const defaultServerUrl = String.fromEnvironment(
+    'SONIC_RELAY_API_URL',
+    defaultValue: 'https://sonicRelay-api.hugodotnet.dev',
+  );
+
+  factory AppConfig.fromEnvironment() =>
+      AppConfig.fromServerUrl(defaultServerUrl);
+
+  /// Builds the config from a single user-facing server URL. The WebSocket
+  /// base URL is derived from the API URL by swapping the scheme
+  /// (`https` -> `wss`, `http` -> `ws`). The host is preserved exactly as
+  /// entered (unlike `Uri`, which would lowercase it).
+  factory AppConfig.fromServerUrl(String serverUrl) {
+    final apiBaseUrl = normalizeServerUrl(serverUrl);
+    final String webSocketBaseUrl;
+    if (apiBaseUrl.startsWith('https://')) {
+      webSocketBaseUrl = 'wss://${apiBaseUrl.substring('https://'.length)}';
+    } else if (apiBaseUrl.startsWith('http://')) {
+      webSocketBaseUrl = 'ws://${apiBaseUrl.substring('http://'.length)}';
+    } else {
+      webSocketBaseUrl = 'wss://$apiBaseUrl';
+    }
+    return AppConfig(
+      apiBaseUrl: apiBaseUrl,
+      webSocketBaseUrl: webSocketBaseUrl,
     );
+  }
+
+  /// Trims surrounding whitespace and removes any trailing slash so URLs are
+  /// stored and compared in a consistent form.
+  static String normalizeServerUrl(String url) {
+    var value = url.trim();
+    while (value.endsWith('/')) {
+      value = value.substring(0, value.length - 1);
+    }
+    return value;
   }
 
   final String apiBaseUrl;

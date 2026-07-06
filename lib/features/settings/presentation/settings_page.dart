@@ -3,12 +3,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../app/theme/app_colors.dart';
 import '../../../app/theme/app_spacing.dart';
-import '../../../core/widgets/connection_badge.dart';
 import '../../../core/widgets/sonic_button.dart';
 import '../../../core/widgets/sonic_card.dart';
 import '../../auth/presentation/login_view_model.dart';
 import '../../devices/presentation/devices_view_model.dart';
 import '../../devices/presentation/widgets/device_card.dart';
+import 'widgets/server_url_field.dart';
 
 class SettingsPage extends ConsumerWidget {
   const SettingsPage({super.key});
@@ -37,29 +37,22 @@ class SettingsPage extends ConsumerWidget {
                     style: Theme.of(context).textTheme.bodyMedium,
                   ),
                   const SizedBox(height: AppSpacing.lg),
-                  const SonicCard(
+                  SonicCard(
                     child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        _SettingsRow(
+                        const _SettingsRow(
                           icon: Icons.cloud_outlined,
-                          title: 'API environment',
-                          subtitle: 'Not connected',
-                          trailing: ConnectionBadge(
-                            label: 'Preview',
-                            status: ConnectionStatus.connecting,
-                          ),
+                          title: 'Server',
+                          subtitle: 'SonicRelay API endpoint',
                         ),
-                        Divider(height: AppSpacing.xl),
-                        _SettingsRow(
+                        const SizedBox(height: AppSpacing.md),
+                        const ServerUrlField(),
+                        const Divider(height: AppSpacing.xl),
+                        const _SettingsRow(
                           icon: Icons.dark_mode_outlined,
                           title: 'Appearance',
                           subtitle: 'Dark theme',
-                        ),
-                        Divider(height: AppSpacing.xl),
-                        _SettingsRow(
-                          icon: Icons.info_outline_rounded,
-                          title: 'Status',
-                          subtitle: 'UI shell only',
                         ),
                       ],
                     ),

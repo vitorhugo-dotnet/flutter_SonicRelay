@@ -6,6 +6,7 @@ import '../../../app/theme/app_spacing.dart';
 import '../../../core/widgets/sonic_button.dart';
 import '../../../core/widgets/sonic_card.dart';
 import '../../../core/widgets/sonic_text_field.dart';
+import '../../settings/presentation/widgets/server_url_field.dart';
 import 'login_view_model.dart';
 
 class LoginPage extends ConsumerStatefulWidget {
@@ -118,6 +119,30 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                             ),
                           ),
                         ],
+                      ),
+                    ),
+                    const SizedBox(height: AppSpacing.md),
+                    SonicCard(
+                      padding: EdgeInsets.zero,
+                      child: Theme(
+                        data: Theme.of(
+                          context,
+                        ).copyWith(dividerColor: Colors.transparent),
+                        child: ExpansionTile(
+                          leading: const Icon(
+                            Icons.dns_outlined,
+                            color: AppColors.accent,
+                          ),
+                          title: const Text('Server settings'),
+                          subtitle: const Text('Configure the SonicRelay server'),
+                          childrenPadding: const EdgeInsets.fromLTRB(
+                            AppSpacing.lg,
+                            0,
+                            AppSpacing.lg,
+                            AppSpacing.lg,
+                          ),
+                          children: const [ServerUrlField()],
+                        ),
                       ),
                     ),
                   ],

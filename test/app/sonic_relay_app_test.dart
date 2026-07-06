@@ -65,7 +65,8 @@ void main() {
     expect(find.text('WebRTC / ICE'), findsOneWidget);
 
     await pumpPage(const SettingsPage());
-    expect(find.text('API environment'), findsOneWidget);
+    expect(find.text('Server'), findsOneWidget);
+    expect(find.text('Server URL'), findsOneWidget);
     expect(find.text('Appearance'), findsOneWidget);
     expect(find.text('Log out'), findsOneWidget);
   });
