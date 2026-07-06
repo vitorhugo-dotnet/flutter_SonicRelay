@@ -84,3 +84,39 @@ jobs:
           name: sonic-relay-apk
           path: build/app/outputs/flutter-apk/app-release.apk
           if-no-files-found: error
+
+  release:
+    name: Publish GitHub Release
+    needs: [analyze, test, build-android]
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve version and tag
+        id: version
+        run: |
+          VERSION_NAME=$(grep '^version:' pubspec.yaml | sed -E 's/^version:[[:space:]]*//' | cut -d'+' -f1)
+          TAG="v${VERSION_NAME}+${{ github.run_number }}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version_name=$VERSION_NAME" >> "$GITHUB_OUTPUT"
+
+      - name: Download APK artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: sonic-relay-apk
+          path: dist
+
+      - name: Rename APK
+        run: mv dist/app-release.apk "dist/sonic-relay-${{ steps.version.outputs.tag }}.apk"
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: ${{ steps.version.outputs.tag }}
+          files: dist/sonic-relay-${{ steps.version.outputs.tag }}.apk
+          generate_release_notes: true
