@@ -7,6 +7,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import '../../core/http/auth_interceptor.dart';
 import '../../core/http/dio_client.dart';
 import '../../core/storage/secure_token_storage.dart';
+import '../../core/storage/server_config_storage.dart';
 import '../../core/webrtc/rtc_ice_server_config.dart';
 import '../../core/webrtc/rtc_peer_connection_factory.dart';
 import '../../core/websocket/websocket_client.dart';
@@ -22,12 +23,44 @@ import '../../features/listener/data/webrtc_receiver_service.dart';
 import '../../features/signaling/data/signaling_client.dart';
 import '../env/app_config.dart';
 
-final appConfigProvider = Provider<AppConfig>(
-  (ref) => AppConfig.fromEnvironment(),
-);
-
 final secureStorageProvider = Provider<FlutterSecureStorage>(
   (ref) => const FlutterSecureStorage(),
+);
+
+final serverConfigStorageProvider = Provider<ServerConfigStorage>(
+  (ref) => ServerConfigStorage(ref.watch(secureStorageProvider)),
+);
+
+/// Holds the currently configured server base URL. The initial value is
+/// injected at startup via an override in `main()` with the persisted URL
+/// (falling back to [AppConfig.defaultServerUrl]). Updating it persists the
+/// new URL and rebuilds every provider that depends on [appConfigProvider].
+final serverUrlProvider = NotifierProvider<ServerUrlNotifier, String>(
+  ServerUrlNotifier.new,
+);
+
+class ServerUrlNotifier extends Notifier<String> {
+  ServerUrlNotifier([this._initialUrl = AppConfig.defaultServerUrl]);
+
+  final String _initialUrl;
+
+  @override
+  String build() => AppConfig.normalizeServerUrl(_initialUrl);
+
+  Future<void> update(String url) async {
+    final normalized = AppConfig.normalizeServerUrl(url);
+    await ref.read(serverConfigStorageProvider).write(normalized);
+    state = normalized;
+  }
+
+  Future<void> reset() async {
+    await ref.read(serverConfigStorageProvider).clear();
+    state = AppConfig.normalizeServerUrl(AppConfig.defaultServerUrl);
+  }
+}
+
+final appConfigProvider = Provider<AppConfig>(
+  (ref) => AppConfig.fromServerUrl(ref.watch(serverUrlProvider)),
 );
 
 final tokenStorageProvider = Provider<TokenStorage>(
