@@ -6,6 +6,7 @@ import '../../features/auth/presentation/login_page.dart';
 import '../../features/auth/presentation/login_view_model.dart';
 import '../../features/listener/presentation/listener_page.dart';
 import '../../features/sessions/presentation/join_session_page.dart';
+import '../../features/sessions/presentation/session_waiting_page.dart';
 import '../../features/settings/presentation/settings_page.dart';
 
 String? authRedirect(AuthState auth, String location) {
@@ -34,6 +35,10 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/join',
         builder: (context, state) => const JoinSessionPage(),
+      ),
+      GoRoute(
+        path: '/session/waiting',
+        builder: (context, state) => const SessionWaitingPage(),
       ),
       GoRoute(
         path: '/listener',

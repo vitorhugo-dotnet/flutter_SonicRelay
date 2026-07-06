@@ -32,7 +32,22 @@ flutter run \
   --dart-define=SONIC_RELAY_WS_URL=wss://api.example.com
 ```
 
-Routes are `/login`, `/join`, `/listener`, and `/settings`. All routes except `/login` are protected; startup restores a stored session before deciding which route to show.
+Routes are `/login`, `/join`, `/session/waiting`, `/listener`, and `/settings`. All routes except `/login` are protected; startup restores a stored session before deciding which route to show.
+
+## Session join flow
+
+An authenticated viewer enters the temporary code shown by the Windows publisher on `/join`. The app trims and normalizes the code to uppercase, validates its shape locally, and requires the backend-issued viewer device UUID before sending:
+
+```json
+{
+  "code": "ABC123",
+  "deviceId": "viewer_device_uuid"
+}
+```
+
+The authenticated Dio client calls `POST /api/sessions/join`. A successful response contains `sessionId`, the `viewer` role, and a `ws` or `wss` `signalingUrl`. This context is kept in memory for signaling; it is not persisted. The app then opens `/session/waiting`, where it displays the prepared connection context until a later signaling feature connects the stream.
+
+Invalid or expired codes and full sessions show specific messages. Network failures can be retried, and an unauthorized response clears the authenticated UI state so the router returns to `/login`.
 
 ## Backend authentication contract
 

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../app/theme/app_colors.dart';
@@ -6,13 +7,23 @@ import '../../../app/theme/app_spacing.dart';
 import '../../../core/widgets/connection_badge.dart';
 import '../../../core/widgets/sonic_button.dart';
 import '../../../core/widgets/sonic_card.dart';
-import '../../../core/widgets/sonic_text_field.dart';
+import 'join_session_view_model.dart';
+import 'widgets/session_code_input.dart';
+import 'widgets/session_status_card.dart';
 
-class JoinSessionPage extends StatelessWidget {
+class JoinSessionPage extends ConsumerWidget {
   const JoinSessionPage({super.key});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final state = ref.watch(joinSessionViewModelProvider);
+    ref.listen(joinSessionViewModelProvider, (previous, next) {
+      if (previous?.status != JoinSessionStatus.joined &&
+          next.status == JoinSessionStatus.joined) {
+        context.go('/session/waiting');
+      }
+    });
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Join session'),
@@ -54,11 +65,12 @@ class JoinSessionPage extends StatelessWidget {
                   SonicCard(
                     child: Column(
                       children: [
-                        const SonicTextField(
-                          label: 'Session code',
-                          hintText: 'SR-4F8K',
-                          prefixIcon: Icons.tag_rounded,
-                          textCapitalization: TextCapitalization.characters,
+                        SessionCodeInput(
+                          enabled: !state.isJoining,
+                          errorText: state.validationMessage,
+                          onChanged: ref
+                              .read(joinSessionViewModelProvider.notifier)
+                              .updateCode,
                         ),
                         const SizedBox(height: AppSpacing.md),
                         const Row(
@@ -83,11 +95,25 @@ class JoinSessionPage extends StatelessWidget {
                         SonicButton(
                           label: 'Join stream',
                           icon: Icons.headphones_rounded,
-                          onPressed: () => context.go('/listener'),
+                          isLoading: state.isJoining,
+                          onPressed: ref
+                              .read(joinSessionViewModelProvider.notifier)
+                              .join,
                         ),
                       ],
                     ),
                   ),
+                  if (state.errorMessage case final message?) ...[
+                    const SizedBox(height: AppSpacing.md),
+                    SessionStatusCard(
+                      message: message,
+                      onRetry: state.canRetry
+                          ? ref
+                                .read(joinSessionViewModelProvider.notifier)
+                                .retry
+                          : null,
+                    ),
+                  ],
                 ],
               ),
             ),

@@ -12,6 +12,8 @@ import '../../features/auth/data/auth_repository.dart';
 import '../../features/devices/data/device_id_storage.dart';
 import '../../features/devices/data/devices_api.dart';
 import '../../features/devices/data/devices_repository.dart';
+import '../../features/sessions/data/sessions_api.dart';
+import '../../features/sessions/data/sessions_repository.dart';
 import '../env/app_config.dart';
 
 final appConfigProvider = Provider<AppConfig>(
@@ -64,6 +66,17 @@ final devicesRepositoryProvider = Provider<DevicesRepository>(
   (ref) => DevicesRepository(
     api: ref.watch(devicesApiProvider),
     deviceIdStorage: ref.watch(deviceIdStorageProvider),
+  ),
+);
+
+final sessionsApiProvider = Provider<SessionsApi>(
+  (ref) => DioSessionsApi(ref.watch(dioProvider)),
+);
+
+final sessionsRepositoryProvider = Provider<SessionsRepository>(
+  (ref) => SessionsRepository(
+    api: ref.watch(sessionsApiProvider),
+    devicesRepository: ref.watch(devicesRepositoryProvider),
   ),
 );
 
