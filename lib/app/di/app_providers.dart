@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -7,6 +9,9 @@ import '../../core/http/dio_client.dart';
 import '../../core/storage/secure_token_storage.dart';
 import '../../features/auth/data/auth_api.dart';
 import '../../features/auth/data/auth_repository.dart';
+import '../../features/devices/data/device_id_storage.dart';
+import '../../features/devices/data/devices_api.dart';
+import '../../features/devices/data/devices_repository.dart';
 import '../env/app_config.dart';
 
 final appConfigProvider = Provider<AppConfig>(
@@ -45,4 +50,23 @@ final authRepositoryProvider = Provider<AuthRepository>(
     api: ref.watch(authApiProvider),
     tokenStorage: ref.watch(tokenStorageProvider),
   ),
+);
+
+final deviceIdStorageProvider = Provider<DeviceIdStorage>(
+  (ref) => SecureDeviceIdStorage(ref.watch(secureStorageProvider)),
+);
+
+final devicesApiProvider = Provider<DevicesApi>(
+  (ref) => DioDevicesApi(ref.watch(dioProvider)),
+);
+
+final devicesRepositoryProvider = Provider<DevicesRepository>(
+  (ref) => DevicesRepository(
+    api: ref.watch(devicesApiProvider),
+    deviceIdStorage: ref.watch(deviceIdStorageProvider),
+  ),
+);
+
+final devicePlatformProvider = Provider<String>(
+  (ref) => Platform.operatingSystem,
 );

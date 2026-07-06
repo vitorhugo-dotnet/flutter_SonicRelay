@@ -3,12 +3,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'router/app_router.dart';
 import 'theme/app_theme.dart';
+import '../features/devices/presentation/devices_view_model.dart';
 
 class SonicRelayApp extends ConsumerWidget {
   const SonicRelayApp({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    ref.watch(devicesViewModelProvider);
     return MaterialApp.router(
       title: 'SonicRelay',
       debugShowCheckedModeBanner: false,

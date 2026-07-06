@@ -50,6 +50,20 @@ Login uses the ASP.NET Identity bearer-token contract. Access and refresh tokens
 
 `SONIC_RELAY_API_URL` is required for a deployed backend. The localhost value in `AppConfig` is intended only for local development; production URLs are not embedded in the app.
 
+## Device registration
+
+After an authenticated session is restored or created, the app registers the installation through the authenticated HTTP client as type `flutter_viewer` and platform `android` or `ios`. The backend-issued device UUID is stored separately from auth tokens through a secure-storage-backed `DeviceIdStorage`; the human-readable device name is never used as an identifier.
+
+On later launches, the app validates the stored UUID with `GET /api/devices/{deviceId}` and reuses an active record. A missing or revoked record is replaced through `POST /api/devices`, and the new UUID is persisted for future session join and WebSocket signaling. Settings uses `GET /api/devices` to show the account's registered devices and registration errors without invalidating the authenticated session.
+
+Required device endpoints:
+
+```text
+POST /api/devices
+GET  /api/devices
+GET  /api/devices/{deviceId}
+```
+
 ## UI preview
 
 The current app provides a dark Material 3 shell with reusable controls and connected token authentication. Session discovery and WebRTC audio are not connected yet.

@@ -7,12 +7,15 @@ import '../../../core/widgets/connection_badge.dart';
 import '../../../core/widgets/sonic_button.dart';
 import '../../../core/widgets/sonic_card.dart';
 import '../../auth/presentation/login_view_model.dart';
+import '../../devices/presentation/devices_view_model.dart';
+import '../../devices/presentation/widgets/device_card.dart';
 
 class SettingsPage extends ConsumerWidget {
   const SettingsPage({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final devices = ref.watch(devicesViewModelProvider);
     return Scaffold(
       appBar: AppBar(title: const Text('Settings')),
       body: SafeArea(
@@ -61,6 +64,55 @@ class SettingsPage extends ConsumerWidget {
                       ],
                     ),
                   ),
+                  const SizedBox(height: AppSpacing.xl),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          'Your devices',
+                          style: Theme.of(context).textTheme.headlineSmall,
+                        ),
+                      ),
+                      IconButton(
+                        tooltip: 'Refresh devices',
+                        onPressed: devices.isLoading
+                            ? null
+                            : () => ref
+                                  .read(devicesViewModelProvider.notifier)
+                                  .refresh(),
+                        icon: const Icon(Icons.refresh_rounded),
+                      ),
+                    ],
+                  ),
+                  if (devices.isLoading) ...[
+                    const SizedBox(height: AppSpacing.sm),
+                    const LinearProgressIndicator(),
+                  ],
+                  if (devices.errorMessage case final message?) ...[
+                    const SizedBox(height: AppSpacing.sm),
+                    Text(
+                      message,
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.error,
+                      ),
+                    ),
+                  ],
+                  if (!devices.isLoading &&
+                      devices.errorMessage == null &&
+                      devices.devices.isEmpty) ...[
+                    const SizedBox(height: AppSpacing.sm),
+                    Text(
+                      'No registered devices found.',
+                      style: Theme.of(context).textTheme.bodyMedium,
+                    ),
+                  ],
+                  for (final device in devices.devices) ...[
+                    const SizedBox(height: AppSpacing.sm),
+                    DeviceCard(
+                      device: device,
+                      isCurrent: device.id == devices.currentDeviceId,
+                    ),
+                  ],
                   const SizedBox(height: AppSpacing.xl),
                   SonicButton(
                     label: 'Log out',
