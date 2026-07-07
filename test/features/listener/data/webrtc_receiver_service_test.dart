@@ -150,6 +150,39 @@ void main() {
     expect(ready.to, 'publisher-1');
   });
 
+  test('session.joined for the publisher replies with viewer.ready', () async {
+    final outbound = <OutboundSignal>[];
+    service.outboundSignals.listen(outbound.add);
+
+    await service.handleSignal(
+      _message(
+        SignalingMessageType.sessionJoined,
+        from: 'publisher-1',
+        payload: const {'participantId': 'publisher-1', 'role': 'publisher'},
+      ),
+    );
+    await Future<void>.delayed(Duration.zero);
+
+    final ready = outbound.single;
+    expect(ready.type, SignalingMessageType.viewerReady);
+    expect(ready.to, 'publisher-1');
+  });
+
+  test('own session.joined (no from) does not reply', () async {
+    final outbound = <OutboundSignal>[];
+    service.outboundSignals.listen(outbound.add);
+
+    await service.handleSignal(
+      _message(
+        SignalingMessageType.sessionJoined,
+        payload: const {'participantId': 'viewer-1', 'role': 'viewer'},
+      ),
+    );
+    await Future<void>.delayed(Duration.zero);
+
+    expect(outbound, isEmpty);
+  });
+
   test('offer sets remote description, answers, and emits webrtc.answer', () async {
     final outbound = <OutboundSignal>[];
     service.outboundSignals.listen(outbound.add);

@@ -67,6 +67,16 @@ class WebRtcReceiverService {
   Future<void> handleSignal(SignalingMessage message) async {
     switch (message.type) {
       case SignalingMessageType.sessionJoined:
+        // If the publisher joined before us, the backend delivers its presence
+        // here (role=publisher, `from`=publisher id) rather than as a separate
+        // `publisher.ready`. Announce `viewer.ready` to it so it creates its peer
+        // connection and sends the offer. This covers the viewer-connects-first
+        // and reconnect cases that a publisher-side `session.joined` trigger
+        // cannot see. Our own join carries no `from`, so it is ignored.
+        if (message.from != null && message.payload['role'] == 'publisher') {
+          _publisherId = message.from;
+          _emit(SignalingMessageType.viewerReady, const {}, to: message.from);
+        }
         if (_state == ListenerConnectionState.idle) {
           _setState(ListenerConnectionState.waitingForOffer);
         }
