@@ -28,7 +28,7 @@ class ListenerPage extends ConsumerWidget {
         actions: [
           IconButton(
             tooltip: 'Settings',
-            onPressed: () => context.go('/settings'),
+            onPressed: () => context.push('/settings'),
             icon: const Icon(Icons.tune_rounded),
           ),
         ],
