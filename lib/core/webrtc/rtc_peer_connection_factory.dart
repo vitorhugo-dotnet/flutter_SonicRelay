@@ -1,5 +1,6 @@
 import 'package:flutter_webrtc/flutter_webrtc.dart' as webrtc;
 
+import '../diagnostics/sonic_log.dart';
 import 'rtc_ice_server_config.dart';
 
 /// Domain-neutral session description (offer/answer) used across the app so
@@ -159,10 +160,41 @@ class FlutterWebRtcPeerConnectionFactory implements RtcPeerConnectionFactory {
 
   @override
   Future<RtcPeerConnection> create(RtcIceServerConfig iceServers) async {
+    await _configureMediaPlaybackAudio();
     final connection = await webrtc.createPeerConnection(
       iceServers.toConfiguration(),
     );
     return _FlutterWebRtcPeerConnection(connection);
+  }
+
+  /// Forces flutter_webrtc's Android audio session into a *media playback*
+  /// profile before the peer connection (and its audio device) come up.
+  ///
+  /// The viewer only ever plays a remote audio track — it is never a two-way
+  /// call. Left to its defaults, flutter_webrtc's Android layer puts the whole
+  /// device into `MODE_IN_COMMUNICATION` with `USAGE_VOICE_COMMUNICATION` /
+  /// `STREAM_VOICE_CALL`. That routes media to the earpiece and drops *every*
+  /// app's audio to muffled, low-bitrate "phone call" quality for as long as
+  /// the session is up (issue #14).
+  ///
+  /// [webrtc.AndroidAudioConfiguration.media] pins `MODE_NORMAL` +
+  /// `USAGE_MEDIA` + `STREAM_MUSIC`, so global Android audio keeps full quality
+  /// and focus is cleanly abandoned on teardown. `setAndroidAudioConfiguration`
+  /// is a no-op off Android, so this is safe to call unconditionally.
+  Future<void> _configureMediaPlaybackAudio() async {
+    try {
+      sonicLog(
+        'Audio',
+        'applying Android media playback profile '
+            '(MODE_NORMAL / USAGE_MEDIA / STREAM_MUSIC) before negotiation',
+      );
+      await webrtc.Helper.setAndroidAudioConfiguration(
+        webrtc.AndroidAudioConfiguration.media,
+      );
+    } catch (error) {
+      // Never let audio-routing configuration block a connection.
+      sonicLog('Audio', 'failed to apply media audio profile: $error');
+    }
   }
 }
 
