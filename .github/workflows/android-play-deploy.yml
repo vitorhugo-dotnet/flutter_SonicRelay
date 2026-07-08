@@ -93,11 +93,13 @@ jobs:
           if-no-files-found: error
 
       - name: Install Fastlane
-        run: gem install fastlane --user-install --no-document
+        run: |
+          gem install fastlane --user-install --no-document
+          echo "$(ruby -e 'print Gem.user_dir')/bin" >> "$GITHUB_PATH"
 
       - name: Upload to Google Play internal testing
         run: |
-          "$HOME/.local/share/gem/ruby/3.2.0/bin/fastlane" supply \
+          fastlane supply \
             --aab build/app/outputs/bundle/release/app-release.aab \
             --track "$PLAY_TRACK" \
             --release_status completed \
