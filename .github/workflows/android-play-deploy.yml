@@ -5,16 +5,6 @@ on:
     tags:
       - "v*"
   workflow_dispatch:
-    inputs:
-      track:
-        description: Google Play track to publish the signed AAB
-        required: true
-        default: internal
-        type: choice
-        options:
-          - internal
-          - alpha
-          - beta
 
 permissions:
   contents: read
@@ -22,10 +12,11 @@ permissions:
 env:
   FLUTTER_VERSION: "3.38.1"
   ANDROID_PACKAGE_NAME: "com.vitorhugo.sonicrelay.sonic_relay"
+  PLAY_TRACK: "internal"
 
 jobs:
   deploy-google-play:
-    name: Deploy signed AAB to Google Play
+    name: Deploy signed AAB to Google Play internal testing
     runs-on: ubuntu-latest
 
     steps:
@@ -48,15 +39,6 @@ jobs:
 
       - name: Install dependencies
         run: flutter pub get
-
-      - name: Resolve Play track
-        id: play_track
-        run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "track=${{ github.event.inputs.track }}" >> "$GITHUB_OUTPUT"
-          else
-            echo "track=internal" >> "$GITHUB_OUTPUT"
-          fi
 
       - name: Validate deployment secrets
         env:
@@ -113,11 +95,11 @@ jobs:
       - name: Install Fastlane
         run: gem install fastlane
 
-      - name: Upload to Google Play
+      - name: Upload to Google Play internal testing
         run: |
           fastlane supply \
             --aab build/app/outputs/bundle/release/app-release.aab \
-            --track "${{ steps.play_track.outputs.track }}" \
+            --track "$PLAY_TRACK" \
             --release_status completed \
             --json_key play-service-account.json \
             --package_name "$ANDROID_PACKAGE_NAME" \
