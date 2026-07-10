@@ -10,6 +10,7 @@ abstract interface class AuthApi {
   Future<LoginResponse> refresh(RefreshTokenRequest request);
   Future<void> logout();
   Future<AuthUser> me();
+  Future<void> deleteAccount();
 }
 
 class DioAuthApi implements AuthApi {
@@ -45,4 +46,7 @@ class DioAuthApi implements AuthApi {
     final response = await _dio.get<Map<String, dynamic>>('/auth/me');
     return AuthUser.fromJson(response.data!);
   }
+
+  @override
+  Future<void> deleteAccount() => _dio.delete<void>('/api/account');
 }

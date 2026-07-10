@@ -1,3 +1,4 @@
+import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sonic_relay/core/storage/secure_token_storage.dart';
 import 'package:sonic_relay/features/auth/data/auth_api.dart';
@@ -27,6 +28,8 @@ class FakeAuthApi implements AuthApi {
   );
   bool logoutThrows = false;
   String? refreshedWith;
+  bool deleteCalled = false;
+  Object? deleteThrows;
 
   @override
   Future<LoginResponse> login(LoginRequest request) async => response;
@@ -43,6 +46,12 @@ class FakeAuthApi implements AuthApi {
 
   @override
   Future<AuthUser> me() async => const AuthUser(id: '1', email: 'a@b.com');
+
+  @override
+  Future<void> deleteAccount() async {
+    deleteCalled = true;
+    if (deleteThrows != null) throw deleteThrows!;
+  }
 }
 
 void main() {
@@ -108,6 +117,61 @@ void main() {
     api.logoutThrows = true;
 
     await repository.logout();
+    expect(storage.value, isNull);
+  });
+
+  test('deleteAccount clears local tokens on success', () async {
+    storage.value = const AuthSession(
+      accessToken: 'a',
+      refreshToken: 'r',
+      expiresIn: 1,
+      tokenType: 'Bearer',
+    );
+
+    await repository.deleteAccount();
+
+    expect(api.deleteCalled, isTrue);
+    expect(storage.value, isNull);
+  });
+
+  test('deleteAccount keeps tokens and throws on server error', () async {
+    storage.value = const AuthSession(
+      accessToken: 'a',
+      refreshToken: 'r',
+      expiresIn: 1,
+      tokenType: 'Bearer',
+    );
+    api.deleteThrows = DioException(
+      requestOptions: RequestOptions(path: '/api/account'),
+      response: Response(
+        requestOptions: RequestOptions(path: '/api/account'),
+        statusCode: 500,
+      ),
+    );
+
+    await expectLater(
+      repository.deleteAccount(),
+      throwsA(isA<AuthFailure>()),
+    );
+    expect(storage.value, isNotNull);
+  });
+
+  test('deleteAccount clears tokens when the server returns 401', () async {
+    storage.value = const AuthSession(
+      accessToken: 'a',
+      refreshToken: 'r',
+      expiresIn: 1,
+      tokenType: 'Bearer',
+    );
+    api.deleteThrows = DioException(
+      requestOptions: RequestOptions(path: '/api/account'),
+      response: Response(
+        requestOptions: RequestOptions(path: '/api/account'),
+        statusCode: 401,
+      ),
+    );
+
+    await repository.deleteAccount();
     expect(storage.value, isNull);
   });
 }

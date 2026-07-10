@@ -70,6 +70,21 @@ class AuthViewModel extends Notifier<AuthState> {
     state = const AuthState.unauthenticated();
   }
 
+  /// Deletes the current account. Returns `null` on success (the user is signed
+  /// out) or an error message to surface while keeping the user signed in.
+  Future<String?> deleteAccount() async {
+    await ref.read(streamLifecycleControllerProvider).forceStop();
+    try {
+      await _repository.deleteAccount();
+      state = const AuthState.unauthenticated();
+      return null;
+    } on AuthFailure catch (error) {
+      return error.message;
+    } catch (_) {
+      return 'Unable to delete your account right now. Please try again.';
+    }
+  }
+
   void expireSession() {
     unawaited(ref.read(streamLifecycleControllerProvider).forceStop());
     state = const AuthState.unauthenticated(

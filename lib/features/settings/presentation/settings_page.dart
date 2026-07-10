@@ -133,6 +133,8 @@ class SettingsPage extends ConsumerWidget {
                         ref.read(authViewModelProvider.notifier).logout(),
                   ),
                   const SizedBox(height: AppSpacing.md),
+                  const _DeleteAccountButton(),
+                  const SizedBox(height: AppSpacing.md),
                   const Text(
                     'SonicRelay mobile viewer · UI preview',
                     textAlign: TextAlign.center,
@@ -143,6 +145,81 @@ class SettingsPage extends ConsumerWidget {
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _DeleteAccountButton extends ConsumerStatefulWidget {
+  const _DeleteAccountButton();
+
+  @override
+  ConsumerState<_DeleteAccountButton> createState() =>
+      _DeleteAccountButtonState();
+}
+
+class _DeleteAccountButtonState extends ConsumerState<_DeleteAccountButton> {
+  bool _isDeleting = false;
+
+  Future<void> _confirmAndDelete() async {
+    final theme = Theme.of(context);
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Delete account?'),
+        content: const Text(
+          'This permanently disables your SonicRelay account. Your devices and '
+          'active sessions are revoked and you will be signed out. This cannot '
+          'be undone.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            style: TextButton.styleFrom(foregroundColor: theme.colorScheme.error),
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    setState(() => _isDeleting = true);
+    final error = await ref.read(authViewModelProvider.notifier).deleteAccount();
+    if (!mounted) return;
+    setState(() => _isDeleting = false);
+    if (error != null) {
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(content: Text(error)));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final errorColor = Theme.of(context).colorScheme.error;
+    return SizedBox(
+      width: double.infinity,
+      child: OutlinedButton.icon(
+        onPressed: _isDeleting ? null : _confirmAndDelete,
+        style: OutlinedButton.styleFrom(
+          foregroundColor: errorColor,
+          side: BorderSide(color: errorColor.withValues(alpha: 0.6)),
+          minimumSize: const Size.fromHeight(54),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+        ),
+        icon: _isDeleting
+            ? const SizedBox.square(
+                dimension: 20,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+            : const Icon(Icons.delete_forever_rounded, size: 20),
+        label: Text(_isDeleting ? 'Deleting…' : 'Delete account'),
       ),
     );
   }

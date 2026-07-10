@@ -78,4 +78,24 @@ class AuthRepository {
       await _tokenStorage.clear();
     }
   }
+
+  /// Permanently disables the current account on the server, then clears local
+  /// credentials. The server failure propagates so the UI can surface it and keep
+  /// the user signed in; the stored token is only cleared on a confirmed deletion.
+  Future<void> deleteAccount() async {
+    try {
+      await _api.deleteAccount();
+    } on DioException catch (error) {
+      final status = error.response?.statusCode;
+      if (status == 401) {
+        // Token already invalid — treat as effectively deleted and sign out.
+        await _tokenStorage.clear();
+        return;
+      }
+      throw const AuthFailure(
+        'Unable to delete your account right now. Please try again.',
+      );
+    }
+    await _tokenStorage.clear();
+  }
 }
