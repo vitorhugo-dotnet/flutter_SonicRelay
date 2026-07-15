@@ -41,12 +41,21 @@ New `lib/core/diagnostics/` module, mirroring the shape already proven in
 
 `sonicLog(tag, message)` in `sonic_log.dart` is replaced by calls into `DiagnosticLog`
 (keeping `debugPrint` in debug builds only, so local development output is unchanged).
-Call sites needing an update: `signaling_client.dart`, `listener_connection_state.dart`,
-`webrtc_receiver_service.dart`, `stream_lifecycle_controller.dart`,
-`foreground_stream_service.dart` — each already logs the moments that matter (connect,
-disconnect, reconnect, ICE state); they gain a `reason` property on disconnect/close
-events instead of a free-text message, using the same bounded enum the Windows and API
-sides use (`normal`, `timeout`, `transport-error`, `server-closed`, `cancelled`).
+Every existing `sonicLog(...)` call site is migrated (a repo-wide `rg -n "sonicLog\("
+lib` is the checklist, not a fixed list written here, since it drifts). The one that
+matters most for this feature is `lib/core/websocket/websocket_client.dart`: it holds the
+actual low-level WebSocket connect/close/error events (`'connecting to...'`, `'connected
+to...'`, `'socket closed by peer'`, `'socket error: ...'`, `'connect failed: ...'`) —
+without migrating it, exported diagnostics would still miss the concrete transport
+failures this feature exists to capture. Other call sites (`signaling_client.dart`,
+`webrtc_receiver_service.dart`, `rtc_peer_connection_factory.dart`,
+`ice_servers_repository.dart`, `stream_lifecycle_controller.dart`,
+`foreground_stream_service.dart`, `sonic_relay_app.dart`, `session_waiting_page.dart`)
+already log the other moments that matter (signaling send/receive, ICE/peer-connection
+state, background lifecycle). The WebSocket close/error sites gain a `reason` property
+using the same bounded enum the Windows and API sides use (`normal`, `timeout`,
+`transport-error`, `server-closed`, `cancelled`) instead of the current free-text error
+interpolation.
 
 App lifecycle transitions (`AppLifecycleState.paused/resumed/detached`) get a dedicated
 `app-lifecycle` category event, since that's the single biggest suspect for "loses
