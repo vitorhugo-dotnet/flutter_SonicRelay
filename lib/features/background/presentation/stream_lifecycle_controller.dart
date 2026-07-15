@@ -12,9 +12,18 @@ typedef LifecycleTimerFactory = Timer Function(
 );
 
 /// Decides when the foreground service should run, based on the viewer's
-/// connection state, whether the app is foreground/background, and the
-/// "keep playing in background" setting. Pure and fully unit-tested: it holds no
-/// WebRTC state and only drives [ForegroundStreamService] plus two callbacks.
+/// connection state and the "keep playing in background" setting. Pure and
+/// fully unit-tested: it holds no WebRTC state and only drives
+/// [ForegroundStreamService] plus two callbacks.
+///
+/// The service is promoted the moment a stream becomes active — while the
+/// app is still in the foreground and the user just triggered it — and stays
+/// promoted for the entire life of the stream, regardless of later
+/// foreground/background transitions. Android restricts *starting* a
+/// foreground service from a backgrounded app, so waiting for the background
+/// transition before promoting (the previous behavior) could silently fail
+/// to ever show the notification, leaving the process with no elevated
+/// priority once it actually went to the background.
 class StreamLifecycleController {
   StreamLifecycleController({
     required ForegroundStreamService service,
@@ -43,7 +52,6 @@ class StreamLifecycleController {
   Timer? _reconnectTimer;
 
   ListenerConnectionState _state = ListenerConnectionState.idle;
-  bool _inForeground = true;
   bool _running = false;
 
   /// A stream that should keep the process alive while backgrounded.
@@ -64,9 +72,14 @@ class StreamLifecycleController {
     _reconcile();
   }
 
+  /// Logged for diagnostics only — foreground/background transitions no
+  /// longer start or stop the service (see class doc), but they remain
+  /// useful context when reading logs alongside signaling/WebRTC state.
   void onAppForegroundChanged(bool inForeground) {
-    _inForeground = inForeground;
-    _reconcile();
+    sonicLog(
+      'Background',
+      'app foreground=$inForeground (serviceRunning=$_running)',
+    );
   }
 
   void _reconcile() {
@@ -80,22 +93,16 @@ class StreamLifecycleController {
         unawaited(_service.stop(endedNotice: _endedNotice(_state)));
         return;
       }
-      if (_inForeground) {
-        // The user is back in the app; the UI is visible so the persistent
-        // notification is no longer warranted.
-        _running = false;
-        _cancelReconnectTimer();
-        unawaited(_service.stop());
-        return;
-      }
-      // Still backgrounded and active: refresh the notification for the new
-      // state and (dis)arm the bounded reconnect timer.
+      // Still active: refresh the notification for the new state and (dis)arm
+      // the bounded reconnect timer. The service stays promoted regardless of
+      // foreground/background so a later transition never needs a second,
+      // possibly-restricted, foreground-service start.
       unawaited(_service.update(_notificationFor(_state)));
       _syncReconnectTimer();
       return;
     }
 
-    if (active && !_inForeground && _keepPlaying()) {
+    if (active && _keepPlaying()) {
       _running = true;
       sonicLog('Background', 'starting foreground service (state=$_state)');
       unawaited(_service.start(_notificationFor(_state)));

@@ -77,11 +77,11 @@ void main() {
     lastTimer = null;
   });
 
-  test('backgrounding while a stream is active starts the service', () {
+  test('a stream becoming active starts the service immediately, while still'
+      ' in the foreground', () {
     final controller = build();
-    controller.onConnectionState(ListenerConnectionState.connected);
 
-    controller.onAppForegroundChanged(false);
+    controller.onConnectionState(ListenerConnectionState.connected);
 
     expect(service.started, hasLength(1));
     expect(service.started.single.body, contains('Listening'));
@@ -90,45 +90,48 @@ void main() {
   test('does not start when the setting is disabled', () {
     keepPlaying = false;
     final controller = build();
-    controller.onConnectionState(ListenerConnectionState.connected);
 
-    controller.onAppForegroundChanged(false);
+    controller.onConnectionState(ListenerConnectionState.connected);
 
     expect(service.started, isEmpty);
   });
 
   test('does not start when no stream is active', () {
     final controller = build();
-    controller.onConnectionState(ListenerConnectionState.idle);
 
-    controller.onAppForegroundChanged(false);
+    controller.onConnectionState(ListenerConnectionState.idle);
 
     expect(service.started, isEmpty);
   });
 
-  test('returning to the foreground stops the service without a notice', () {
-    final controller = build();
-    controller.onConnectionState(ListenerConnectionState.connected);
-    controller.onAppForegroundChanged(false);
+  test(
+    'foreground/background transitions neither stop nor restart a running'
+    ' service',
+    () {
+      final controller = build();
+      controller.onConnectionState(ListenerConnectionState.connected);
 
-    controller.onAppForegroundChanged(true);
+      controller.onAppForegroundChanged(false);
+      controller.onAppForegroundChanged(true);
+      controller.onAppForegroundChanged(false);
 
-    expect(service.stopped, [null]);
-  });
+      expect(service.started, hasLength(1));
+      expect(service.stopped, isEmpty);
+    },
+  );
 
   test('does not start twice while already running', () {
     final controller = build();
     controller.onConnectionState(ListenerConnectionState.connected);
-    controller.onAppForegroundChanged(false);
+
     controller.onConnectionState(ListenerConnectionState.connected);
 
     expect(service.started, hasLength(1));
   });
 
-  test('a state change while backgrounded updates the notification', () {
+  test('a state change while running updates the notification', () {
     final controller = build();
     controller.onConnectionState(ListenerConnectionState.connected);
-    controller.onAppForegroundChanged(false);
 
     controller.onConnectionState(ListenerConnectionState.reconnecting);
 
@@ -138,7 +141,6 @@ void main() {
   test('a terminal state while running stops with an ended notice', () {
     final controller = build();
     controller.onConnectionState(ListenerConnectionState.connected);
-    controller.onAppForegroundChanged(false);
 
     controller.onConnectionState(ListenerConnectionState.ended);
 
@@ -150,7 +152,6 @@ void main() {
       () {
     final controller = build();
     controller.onConnectionState(ListenerConnectionState.connected);
-    controller.onAppForegroundChanged(false);
     controller.onConnectionState(ListenerConnectionState.reconnecting);
 
     expect(lastTimer, isNotNull);
@@ -163,7 +164,6 @@ void main() {
   test('recovering before the reconnect window cancels the timeout', () {
     final controller = build();
     controller.onConnectionState(ListenerConnectionState.connected);
-    controller.onAppForegroundChanged(false);
     controller.onConnectionState(ListenerConnectionState.reconnecting);
     controller.onConnectionState(ListenerConnectionState.connected);
 
@@ -189,7 +189,6 @@ void main() {
   test('forceStop stops a running service (logout)', () {
     final controller = build();
     controller.onConnectionState(ListenerConnectionState.connected);
-    controller.onAppForegroundChanged(false);
 
     controller.forceStop();
 
