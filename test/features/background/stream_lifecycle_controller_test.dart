@@ -120,6 +120,61 @@ void main() {
     },
   );
 
+  test(
+    'enabling the setting mid-stream while foregrounded starts the service'
+    ' once the app backgrounds',
+    () {
+      keepPlaying = false;
+      final controller = build();
+      controller.onConnectionState(ListenerConnectionState.connected);
+      expect(service.started, isEmpty);
+
+      keepPlaying = true;
+      controller.onAppForegroundChanged(false);
+
+      expect(service.started, hasLength(1));
+    },
+  );
+
+  test('reconnecting while still foregrounded does not arm the bounded'
+      ' reconnect timeout', () {
+    final controller = build();
+    controller.onConnectionState(ListenerConnectionState.connected);
+
+    controller.onConnectionState(ListenerConnectionState.reconnecting);
+
+    expect(lastTimer, isNull);
+  });
+
+  test('backgrounding while already reconnecting arms the bounded reconnect'
+      ' timeout', () {
+    final controller = build();
+    controller.onConnectionState(ListenerConnectionState.connected);
+    controller.onConnectionState(ListenerConnectionState.reconnecting);
+    expect(lastTimer, isNull);
+
+    controller.onAppForegroundChanged(false);
+
+    expect(lastTimer, isNotNull);
+    expect(lastTimer!.isActive, isTrue);
+  });
+
+  test('returning to the foreground while reconnecting cancels the bounded'
+      ' reconnect timeout, so the user is never kicked out from under'
+      ' themselves', () {
+    final controller = build();
+    controller.onConnectionState(ListenerConnectionState.connected);
+    controller.onAppForegroundChanged(false);
+    controller.onConnectionState(ListenerConnectionState.reconnecting);
+    expect(lastTimer!.isActive, isTrue);
+
+    controller.onAppForegroundChanged(true);
+
+    expect(lastTimer!.isActive, isFalse);
+    expect(stopRequests, 0);
+    expect(service.stopped, isEmpty);
+  });
+
   test('does not start twice while already running', () {
     final controller = build();
     controller.onConnectionState(ListenerConnectionState.connected);
@@ -148,10 +203,11 @@ void main() {
     expect(service.stopped.single, isNotNull);
   });
 
-  test('reconnect timeout stops the service and gives up the peer connection',
-      () {
+  test('reconnect timeout stops the service and gives up the peer connection'
+      ' (while backgrounded)', () {
     final controller = build();
     controller.onConnectionState(ListenerConnectionState.connected);
+    controller.onAppForegroundChanged(false);
     controller.onConnectionState(ListenerConnectionState.reconnecting);
 
     expect(lastTimer, isNotNull);
@@ -164,6 +220,7 @@ void main() {
   test('recovering before the reconnect window cancels the timeout', () {
     final controller = build();
     controller.onConnectionState(ListenerConnectionState.connected);
+    controller.onAppForegroundChanged(false);
     controller.onConnectionState(ListenerConnectionState.reconnecting);
     controller.onConnectionState(ListenerConnectionState.connected);
 

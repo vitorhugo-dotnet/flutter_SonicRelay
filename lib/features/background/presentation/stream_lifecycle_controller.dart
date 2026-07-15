@@ -52,6 +52,7 @@ class StreamLifecycleController {
   Timer? _reconnectTimer;
 
   ListenerConnectionState _state = ListenerConnectionState.idle;
+  bool _inForeground = true;
   bool _running = false;
 
   /// A stream that should keep the process alive while backgrounded.
@@ -72,14 +73,20 @@ class StreamLifecycleController {
     _reconcile();
   }
 
-  /// Logged for diagnostics only — foreground/background transitions no
-  /// longer start or stop the service (see class doc), but they remain
-  /// useful context when reading logs alongside signaling/WebRTC state.
+  /// Foreground/background transitions no longer stop or restart an already
+  /// running service (see class doc), but they still trigger a reconcile so
+  /// that: (1) the bounded reconnect timeout — see [_syncReconnectTimer] — is
+  /// armed only while actually backgrounded, never while the user is looking
+  /// at a "Reconnecting…" screen, and (2) enabling "keep playing in
+  /// background" mid-stream while foregrounded still protects the stream the
+  /// moment the app backgrounds, even without a connection-state change.
   void onAppForegroundChanged(bool inForeground) {
+    _inForeground = inForeground;
     sonicLog(
       'Background',
       'app foreground=$inForeground (serviceRunning=$_running)',
     );
+    _reconcile();
   }
 
   void _reconcile() {
@@ -111,7 +118,11 @@ class StreamLifecycleController {
   }
 
   void _syncReconnectTimer() {
-    if (_running && _state == ListenerConnectionState.reconnecting) {
+    // Bounded-give-up is a background-only battery/UX concern: a foreground
+    // user watching "Reconnecting…" must never be silently kicked out from
+    // under them just because the window elapsed while they were looking
+    // right at it.
+    if (_running && !_inForeground && _state == ListenerConnectionState.reconnecting) {
       _reconnectTimer ??= _timerFactory(_reconnectWindow, _onReconnectTimeout);
     } else {
       _cancelReconnectTimer();
