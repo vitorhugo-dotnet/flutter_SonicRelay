@@ -168,7 +168,10 @@ final devicePlatformProvider = Provider<String>(
 );
 
 final webSocketClientProvider = Provider<WebSocketClient>(
-  (ref) => WebSocketClient(connector: ioWebSocketConnector),
+  (ref) => WebSocketClient(
+    connector: ioWebSocketConnector,
+    diagnosticLog: ref.watch(diagnosticLogProvider),
+  ),
 );
 
 final signalingClientProvider = Provider<SignalingClient>(
