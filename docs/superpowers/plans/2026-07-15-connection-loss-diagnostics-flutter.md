@@ -131,26 +131,40 @@ class DiagnosticEvent {
 // lib/core/diagnostics/diagnostic_redactor.dart
 /// Strips secrets, SDP/ICE payloads and emails out of log lines before they
 /// reach memory or disk. Mirrors windows_SonicRelay's DiagnosticRedactor rules.
+///
+/// Note: Dart's RegExp (ECMAScript-flavored) has no inline `(?i)` case flag
+/// like .NET's regex engine — verified empirically (it throws
+/// FormatException). Every case-insensitive pattern below uses the
+/// `caseSensitive: false` constructor parameter instead.
 class DiagnosticRedactor {
   const DiagnosticRedactor._();
 
   static const _redacted = '[REDACTED]';
 
-  static final _bearerToken = RegExp(r'(?i)\bbearer\s+[^\s,;]+');
+  static final _bearerToken = RegExp(
+    r'\bbearer\s+[^\s,;]+',
+    caseSensitive: false,
+  );
   static final _jwt = RegExp(r'\bey[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b');
   static final _email = RegExp(
     r'\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b',
     caseSensitive: false,
   );
   static final _sdpPayload = RegExp(
-    r'(?i)\bsdp\s*=\s*.*',
+    r'\bsdp\s*=\s*.*',
+    caseSensitive: false,
   );
-  static final _iceCandidate = RegExp(r'(?i)candidate:[^\r\n]+');
+  static final _iceCandidate = RegExp(
+    r'candidate:[^\r\n]+',
+    caseSensitive: false,
+  );
   static final _sensitiveAssignment = RegExp(
-    r'(?i)\b(password|access[_-]?token|refresh[_-]?token|token|code)\s*=\s*[^\s&]+',
+    r'\b(password|access[_-]?token|refresh[_-]?token|token|code)\s*=\s*[^\s&]+',
+    caseSensitive: false,
   );
   static final _sensitiveKey = RegExp(
-    r'(?i)^(password|access[_-]?token|refresh[_-]?token|token|authorization|sdp|ice[_-]?candidate)$',
+    r'^(password|access[_-]?token|refresh[_-]?token|token|authorization|sdp|ice[_-]?candidate)$',
+    caseSensitive: false,
   );
 
   static String redact(String? value) {
