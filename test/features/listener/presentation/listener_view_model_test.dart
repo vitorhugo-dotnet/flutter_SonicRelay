@@ -46,6 +46,28 @@ class FakeWebSocketConnection implements WebSocketConnection {
   void emit(String data) => _controller.add(data);
 }
 
+class SlowFailingCloseWebSocketConnection implements WebSocketConnection {
+  final _controller = StreamController<dynamic>.broadcast();
+  final closeStarted = Completer<void>();
+  final closeResult = Completer<void>();
+
+  @override
+  Stream<dynamic> get stream => _controller.stream;
+
+  @override
+  void add(String data) {}
+
+  @override
+  Future<void> close() {
+    closeStarted.complete();
+    return closeResult.future;
+  }
+
+  void emit(String data) => _controller.add(data);
+
+  Future<void> dispose() => _controller.close();
+}
+
 class FakeDeviceIdentitySession implements DeviceIdentitySession {
   @override
   Future<String> accessToken({bool forceRefresh = false}) async => 'token-1';
@@ -288,4 +310,91 @@ void main() {
     expect(socketClosedBeforeReceiverFinished, isTrue);
     expect(peerCreatesBeforeReceiverFinished, 0);
   });
+
+  test(
+    'leave stops offers immediately and awaits slow receiver after socket close fails',
+    () async {
+      final audio = SlowAudioReceiverService();
+      final peerFactory = CountingRtcPeerConnectionFactory();
+      final receiver = WebRtcReceiverService(
+        peerConnectionFactory: peerFactory,
+        audioReceiver: audio,
+      );
+      final connection = SlowFailingCloseWebSocketConnection();
+      final webSocketClient = WebSocketClient(
+        connector: (uri, headers) async => connection,
+        scheduleTimer: (delay, callback) => Timer(Duration.zero, callback),
+      );
+      final signalingClient = SignalingClient(
+        webSocketClient: webSocketClient,
+        deviceIdentitySession: FakeDeviceIdentitySession(),
+      );
+      final container = ProviderContainer(
+        overrides: [
+          signalingClientProvider.overrideWithValue(signalingClient),
+          webRtcReceiverServiceProvider.overrideWithValue(receiver),
+        ],
+      );
+      addTearDown(() async {
+        if (!connection.closeResult.isCompleted) {
+          connection.closeResult.complete();
+        }
+        if (!audio.stopResult.isCompleted) audio.stopResult.complete();
+        container.dispose();
+        await signalingClient.dispose();
+        await receiver.dispose();
+        await connection.dispose();
+      });
+      final listener = container.read(listenerViewModelProvider.notifier);
+      await listener.connect(
+        session: StreamSession(
+          sessionId: 'session-1',
+          signalingUrl: Uri.parse('wss://stream.example/ws/signaling'),
+        ),
+      );
+      await Future<void>.delayed(Duration.zero);
+
+      Object? leaveError;
+      StackTrace? leaveStack;
+      var leaveCompleted = false;
+      final leaving = listener.leave().then<void>(
+        (_) => leaveCompleted = true,
+        onError: (Object error, StackTrace stack) {
+          leaveError = error;
+          leaveStack = stack;
+          leaveCompleted = true;
+        },
+      );
+      await connection.closeStarted.future;
+
+      connection.emit(
+        jsonEncode({
+          'type': 'webrtc.offer',
+          'messageId': 'late-offer',
+          'sessionId': 'session-1',
+          'from': 'publisher-1',
+          'timestamp': DateTime.now().toUtc().toIso8601String(),
+          'payload': {'sdp': 'late-sdp', 'type': 'offer'},
+        }),
+      );
+      await Future<void>.delayed(Duration.zero);
+      await Future<void>.delayed(Duration.zero);
+      final receiverStartedWhileSocketClosePending =
+          audio.stopStarted.isCompleted;
+      final socketError = StateError('socket close failed');
+      final socketStack = StackTrace.fromString('socket-close-stack');
+      connection.closeResult.completeError(socketError, socketStack);
+      await Future<void>.delayed(Duration.zero);
+      final leaveCompletedBeforeReceiverFinished = leaveCompleted;
+
+      audio.stopResult.complete();
+      await leaving;
+
+      expect(receiverStartedWhileSocketClosePending, isTrue);
+      expect(peerFactory.createCalls, 0);
+      expect(leaveCompletedBeforeReceiverFinished, isFalse);
+      expect(leaveError, same(socketError));
+      expect(leaveStack.toString(), socketStack.toString());
+    },
+  );
 }

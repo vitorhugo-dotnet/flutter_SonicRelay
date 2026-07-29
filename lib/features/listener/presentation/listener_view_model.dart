@@ -100,9 +100,15 @@ class ListenerViewModel extends Notifier<ListenerState> {
   Future<void> reconnect() => _receiver.reconnect();
 
   /// Leaves the session: invalidates signaling first so no late token, socket,
-  /// or offer can race with peer-connection/audio teardown.
+  /// or offer can race with peer-connection/audio teardown. Both cleanups run
+  /// concurrently and must finish before an error is reported.
   Future<void> leave() async {
-    await _signaling.leave();
-    await _receiver.leave();
+    final signalingLeave = _signaling.leave();
+    final receiverLeave = _receiver.leave();
+
+    await Future.wait<void>(
+      [signalingLeave, receiverLeave],
+      eagerError: false,
+    );
   }
 }
