@@ -25,6 +25,9 @@ abstract interface class WebSocketConnection {
 typedef WebSocketConnector =
     Future<WebSocketConnection> Function(Uri uri, Map<String, String> headers);
 
+typedef WebSocketHeadersProvider =
+    Future<Map<String, String>> Function(bool isReconnect);
+
 /// Default [WebSocketConnector] backed by `dart:io`'s [WebSocket].
 Future<WebSocketConnection> ioWebSocketConnector(
   Uri uri,
@@ -87,8 +90,7 @@ class WebSocketClient {
 
   final WebSocketConnector _connector;
   final ReconnectPolicy _reconnectPolicy;
-  final Timer Function(Duration delay, void Function() callback)
-  _scheduleTimer;
+  final Timer Function(Duration delay, void Function() callback) _scheduleTimer;
 
   final _stateController =
       StreamController<WebSocketConnectionState>.broadcast();
@@ -103,89 +105,129 @@ class WebSocketClient {
   StreamSubscription<dynamic>? _subscription;
   Timer? _reconnectTimer;
   int _attempt = 0;
+  int _generation = 0;
   bool _stopped = true;
   Uri? _uri;
   Map<String, String> _headers = const {};
+  WebSocketHeadersProvider? _headersProvider;
 
-  Future<void> connect(Uri uri, {Map<String, String> headers = const {}}) async {
+  Future<void> connect(
+    Uri uri, {
+    Map<String, String> headers = const {},
+    WebSocketHeadersProvider? headersProvider,
+  }) async {
+    final generation = ++_generation;
     _stopped = false;
+    _reconnectTimer?.cancel();
+    _reconnectTimer = null;
+
+    final previousSubscription = _subscription;
+    _subscription = null;
+    final previousConnection = _connection;
+    _connection = null;
+    if (previousSubscription != null) {
+      await previousSubscription.cancel();
+      if (!_isCurrent(generation) && previousConnection == null) return;
+    }
+    if (previousConnection != null) {
+      await previousConnection.close();
+    }
+    if (!_isCurrent(generation)) return;
+
     _uri = uri;
     _headers = headers;
+    _headersProvider = headersProvider;
     _attempt = 0;
-    _reconnectTimer?.cancel();
-    await _attemptConnect();
+    await _attemptConnect(generation);
   }
 
-  Future<void> _attemptConnect() async {
-    if (_stopped) return;
+  Future<void> _attemptConnect(int generation) async {
+    if (!_isCurrent(generation)) return;
     if (_attempt == 0) {
       _stateController.add(WebSocketConnectionState.connecting);
     }
     try {
-      sonicLog('WebSocket', 'connecting to $_uri (attempt $_attempt)');
-      final connection = await _connector(_uri!, _headers);
-      if (_stopped) {
+      final uri = _uri!;
+      final isReconnect = _attempt > 0;
+      sonicLog('WebSocket', 'connecting to $uri (attempt $_attempt)');
+      final headersProvider = _headersProvider;
+      final headers = headersProvider == null
+          ? _headers
+          : await headersProvider(isReconnect);
+      if (!_isCurrent(generation)) return;
+      final connection = await _connector(uri, headers);
+      if (!_isCurrent(generation)) {
         await connection.close();
         return;
       }
       _connection = connection;
       _attempt = 0;
-      sonicLog('WebSocket', 'connected to $_uri');
+      sonicLog('WebSocket', 'connected to $uri');
       _stateController.add(WebSocketConnectionState.connected);
       _subscription = connection.stream.listen(
         (dynamic data) {
-          if (data is String) {
+          if (_isCurrent(generation) && data is String) {
             _messageController.add(WebSocketMessage.decode(data));
           }
         },
         onDone: () {
           sonicLog('WebSocket', 'socket closed by peer');
-          _handleDisconnect();
+          _handleDisconnect(generation, connection);
         },
         onError: (Object error) {
           sonicLog('WebSocket', 'socket error: $error');
-          _handleDisconnect();
+          _handleDisconnect(generation, connection);
         },
         cancelOnError: true,
       );
     } catch (error) {
+      if (!_isCurrent(generation)) return;
       sonicLog('WebSocket', 'connect failed: $error');
-      _scheduleReconnect();
+      _scheduleReconnect(generation);
     }
   }
 
-  void _handleDisconnect() {
+  void _handleDisconnect(int generation, WebSocketConnection connection) {
+    if (!_isCurrent(generation) || !identical(_connection, connection)) return;
     unawaited(_subscription?.cancel());
     _subscription = null;
     _connection = null;
-    if (_stopped) {
-      _stateController.add(WebSocketConnectionState.disconnected);
-      return;
-    }
-    _scheduleReconnect();
+    _scheduleReconnect(generation);
   }
 
-  void _scheduleReconnect() {
-    if (_stopped) return;
+  void _scheduleReconnect(int generation) {
+    if (!_isCurrent(generation)) return;
     final delay = _reconnectPolicy.delayForAttempt(_attempt);
     _attempt++;
     _stateController.add(WebSocketConnectionState.reconnecting);
     _reconnectTimer = _scheduleTimer(delay, () {
-      unawaited(_attemptConnect());
+      if (_isCurrent(generation)) {
+        unawaited(_attemptConnect(generation));
+      }
     });
   }
+
+  bool _isCurrent(int generation) => !_stopped && generation == _generation;
 
   /// Sends a raw text frame. Silently dropped while disconnected.
   void send(String data) => _connection?.add(data);
 
   /// Closes the connection and stops all reconnect attempts.
   Future<void> disconnect() async {
+    final generation = ++_generation;
     _stopped = true;
     _reconnectTimer?.cancel();
-    await _subscription?.cancel();
+    _reconnectTimer = null;
+    final subscription = _subscription;
     _subscription = null;
-    await _connection?.close();
+    final connection = _connection;
     _connection = null;
+    await subscription?.cancel();
+    final supersededAfterCancel = generation != _generation || !_stopped;
+    await connection?.close();
+    if (supersededAfterCancel || generation != _generation || !_stopped) {
+      return;
+    }
     _stateController.add(WebSocketConnectionState.disconnected);
   }
 

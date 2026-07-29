@@ -1,8 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../../app/di/app_providers.dart';
 import '../../../app/theme/app_spacing.dart';
 import '../../../core/diagnostics/sonic_log.dart';
 import '../../../core/widgets/connection_badge.dart';
@@ -20,6 +21,9 @@ class SessionWaitingPage extends ConsumerStatefulWidget {
 
 class _SessionWaitingPageState extends ConsumerState<SessionWaitingPage> {
   bool _started = false;
+  bool _connectionStarted = false;
+  bool _handedOff = false;
+  ListenerViewModel? _listener;
   String? _error;
 
   @override
@@ -40,9 +44,10 @@ class _SessionWaitingPageState extends ConsumerState<SessionWaitingPage> {
     try {
       // Instantiating the notifier wires the signaling -> receiver bridge
       // before the socket opens, then connect() starts the handshake.
-      await ref
-          .read(listenerViewModelProvider.notifier)
-          .connect(session: session);
+      final listener = ref.read(listenerViewModelProvider.notifier);
+      _listener = listener;
+      _connectionStarted = true;
+      await listener.connect(session: session);
     } catch (error) {
       sonicLog('Waiting', 'connect failed: $error');
       if (mounted) {
@@ -54,7 +59,18 @@ class _SessionWaitingPageState extends ConsumerState<SessionWaitingPage> {
     }
 
     sonicLog('Waiting', 'signaling opened -> navigating to /listener');
-    if (mounted) context.go('/listener');
+    if (mounted) {
+      _handedOff = true;
+      context.go('/listener');
+    }
+  }
+
+  @override
+  void dispose() {
+    if (_connectionStarted && !_handedOff) {
+      unawaited(_listener!.leave());
+    }
+    super.dispose();
   }
 
   @override

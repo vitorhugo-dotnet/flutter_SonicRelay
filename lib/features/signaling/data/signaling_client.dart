@@ -55,7 +55,6 @@ class SignalingClient {
 
   StreamSession? _session;
   bool _leaving = false;
-  bool _refreshingReconnect = false;
 
   Stream<SignalingConnectionState> get connectionState =>
       _connectionStateController.stream;
@@ -67,22 +66,16 @@ class SignalingClient {
   Future<void> connect({required StreamSession session}) async {
     _session = session;
     _leaving = false;
-
-    await _connectWithCurrentToken(forceRefresh: false);
-  }
-
-  Future<void> _connectWithCurrentToken({required bool forceRefresh}) async {
-    final session = _session;
-    if (session == null || _leaving) return;
-    final token = await _deviceIdentitySession.accessToken(
-      forceRefresh: forceRefresh,
-    );
-    if (_leaving) return;
     final uri = _buildUri(session.signalingUrl, session.sessionId);
     sonicLog('Signaling', 'connect sessionId=${session.sessionId} uri=$uri');
     await _webSocketClient.connect(
       uri,
-      headers: {'Authorization': 'DeviceBearer $token'},
+      headersProvider: (isReconnect) async {
+        final token = await _deviceIdentitySession.accessToken(
+          forceRefresh: isReconnect,
+        );
+        return {'Authorization': 'DeviceBearer $token'};
+      },
     );
   }
 
@@ -93,40 +86,13 @@ class SignalingClient {
   void _handleTransportState(WebSocketConnectionState state) {
     switch (state) {
       case WebSocketConnectionState.connecting:
-        _connectionStateController.add(
-          _refreshingReconnect
-              ? SignalingConnectionState.reconnecting
-              : SignalingConnectionState.connecting,
-        );
+        _connectionStateController.add(SignalingConnectionState.connecting);
       case WebSocketConnectionState.connected:
         _connectionStateController.add(SignalingConnectionState.connected);
       case WebSocketConnectionState.reconnecting:
         _connectionStateController.add(SignalingConnectionState.reconnecting);
-        if (!_leaving && !_refreshingReconnect) {
-          unawaited(_reconnectWithFreshToken());
-        }
       case WebSocketConnectionState.disconnected:
-        if (!_refreshingReconnect) {
-          _connectionStateController.add(SignalingConnectionState.disconnected);
-        }
-    }
-  }
-
-  Future<void> _reconnectWithFreshToken() async {
-    _refreshingReconnect = true;
-    await _webSocketClient.disconnect();
-    if (_leaving) {
-      _refreshingReconnect = false;
-      return;
-    }
-    try {
-      await _connectWithCurrentToken(forceRefresh: true);
-    } catch (_) {
-      if (!_leaving) {
         _connectionStateController.add(SignalingConnectionState.disconnected);
-      }
-    } finally {
-      _refreshingReconnect = false;
     }
   }
 

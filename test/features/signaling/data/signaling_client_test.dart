@@ -32,15 +32,59 @@ class MutableDeviceIdentitySession implements DeviceIdentitySession {
   String token = 'token-abc';
 
   final List<bool> forceRefreshes = [];
+  final List<Object> errors = [];
 
   @override
   Future<String> accessToken({bool forceRefresh = false}) async {
     forceRefreshes.add(forceRefresh);
+    if (errors.isNotEmpty) throw errors.removeAt(0);
     return token;
   }
 
   @override
   Future<void> reset() async {}
+}
+
+class SupersededDeviceIdentitySession implements DeviceIdentitySession {
+  final firstStarted = Completer<void>();
+  final firstToken = Completer<String>();
+  var calls = 0;
+
+  @override
+  Future<String> accessToken({bool forceRefresh = false}) {
+    calls++;
+    if (calls == 1) {
+      firstStarted.complete();
+      return firstToken.future;
+    }
+    return Future<String>.value('token-2');
+  }
+
+  @override
+  Future<void> reset() async {}
+}
+
+class ManualTimer implements Timer {
+  ManualTimer(this.delay, this._callback);
+
+  final Duration delay;
+  final void Function() _callback;
+  bool _active = true;
+
+  void fire() {
+    if (!_active) return;
+    _active = false;
+    _callback();
+  }
+
+  @override
+  void cancel() => _active = false;
+
+  @override
+  bool get isActive => _active;
+
+  @override
+  int get tick => _active ? 0 : 1;
 }
 
 Timer _instantTimer(Duration delay, void Function() callback) =>
@@ -108,6 +152,87 @@ void main() {
     expect(requestedHeaders[0]['Authorization'], 'DeviceBearer token-abc');
     expect(requestedHeaders[1]['Authorization'], 'DeviceBearer token-2');
     expect(identity.forceRefreshes, [false, true]);
+  });
+
+  test('transient token failure retries and then connects', () async {
+    identity.errors.add(Exception('token temporarily unavailable'));
+    identity.token = 'token-2';
+
+    await signalingClient.connect(session: session);
+    for (var i = 0; i < 6 && requestedHeaders.isEmpty; i++) {
+      await Future<void>.delayed(Duration.zero);
+    }
+
+    expect(identity.forceRefreshes, [false, true]);
+    expect(requestedHeaders.single['Authorization'], 'DeviceBearer token-2');
+  });
+
+  test('leave cancels retry after a transient token failure', () async {
+    final timers = <ManualTimer>[];
+    final localIdentity = MutableDeviceIdentitySession()
+      ..errors.add(Exception('token temporarily unavailable'));
+    var connectorCalls = 0;
+    final webSocketClient = WebSocketClient(
+      connector: (uri, headers) async {
+        connectorCalls++;
+        return FakeWebSocketConnection();
+      },
+      scheduleTimer: (delay, callback) {
+        final timer = ManualTimer(delay, callback);
+        timers.add(timer);
+        return timer;
+      },
+    );
+    final localClient = SignalingClient(
+      webSocketClient: webSocketClient,
+      deviceIdentitySession: localIdentity,
+    );
+    addTearDown(localClient.dispose);
+
+    await localClient.connect(session: session);
+    final retry = timers.single;
+    await localClient.leave();
+    retry.fire();
+    await Future<void>.delayed(Duration.zero);
+
+    expect(retry.isActive, isFalse);
+    expect(localIdentity.forceRefreshes, [false]);
+    expect(connectorCalls, 0);
+  });
+
+  test('a newer session supersedes an in-flight token operation', () async {
+    final localIdentity = SupersededDeviceIdentitySession();
+    final uris = <Uri>[];
+    final webSocketClient = WebSocketClient(
+      connector: (uri, headers) async {
+        uris.add(uri);
+        return FakeWebSocketConnection();
+      },
+      scheduleTimer: _instantTimer,
+    );
+    final localClient = SignalingClient(
+      webSocketClient: webSocketClient,
+      deviceIdentitySession: localIdentity,
+    );
+    addTearDown(localClient.dispose);
+    final firstSession = StreamSession(
+      sessionId: 'session-1',
+      signalingUrl: Uri.parse('wss://stream.example/ws/signaling'),
+    );
+    final secondSession = StreamSession(
+      sessionId: 'session-2',
+      signalingUrl: Uri.parse('wss://stream.example/ws/signaling'),
+    );
+
+    final firstConnect = localClient.connect(session: firstSession);
+    await localIdentity.firstStarted.future;
+    await localClient.connect(session: secondSession);
+    localIdentity.firstToken.complete('token-1');
+    await firstConnect;
+
+    expect(uris.map((uri) => uri.queryParameters), [
+      {'sessionId': 'session-2'},
+    ]);
   });
 
   test('does not auto-send viewer.ready on connect', () async {
