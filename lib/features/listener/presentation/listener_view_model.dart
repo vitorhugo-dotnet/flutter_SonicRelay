@@ -63,14 +63,14 @@ class ListenerViewModel extends Notifier<ListenerState> {
     _connectionSubscription = _receiver.connectionState.listen((connection) {
       state = state.copyWith(connection: connection);
       // Drive the background foreground-service decision from the same states.
-      ref
-          .read(streamLifecycleControllerProvider)
-          .onConnectionState(connection);
+      ref.read(streamLifecycleControllerProvider).onConnectionState(connection);
     });
     _statsSubscription = _receiver.stats.listen((stats) {
       state = state.copyWith(stats: stats);
     });
-    _signalingStateSubscription = _signaling.connectionState.listen((signaling) {
+    _signalingStateSubscription = _signaling.connectionState.listen((
+      signaling,
+    ) {
       state = state.copyWith(signaling: signaling);
     });
 
@@ -92,10 +92,8 @@ class ListenerViewModel extends Notifier<ListenerState> {
   /// routed to the WebRTC receiver (wired in [build]), so once connected the
   /// publisher handshake (`viewer.ready` -> offer -> answer) proceeds on its
   /// own. Throws if the socket cannot be opened.
-  Future<void> connect({
-    required StreamSession session,
-    required String deviceId,
-  }) => _signaling.connect(session: session, deviceId: deviceId);
+  Future<void> connect({required StreamSession session}) =>
+      _signaling.connect(session: session);
 
   /// Nudges a stalled connection to recover by re-announcing readiness to the
   /// publisher (invoked from the background notification's "Reconnect" action).

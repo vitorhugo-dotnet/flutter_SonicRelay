@@ -20,6 +20,9 @@ import '../../core/webrtc/rtc_peer_connection_factory.dart';
 import '../../core/websocket/websocket_client.dart';
 import '../../features/auth/data/auth_api.dart';
 import '../../features/auth/data/auth_repository.dart';
+import '../../features/device_identity/data/device_credential_storage.dart';
+import '../../features/device_identity/data/device_identity_api.dart';
+import '../../features/device_identity/data/device_identity_session.dart';
 import '../../features/devices/data/device_id_storage.dart';
 import '../../features/devices/data/devices_api.dart';
 import '../../features/devices/data/devices_repository.dart';
@@ -98,11 +101,42 @@ final tokenStorageProvider = Provider<TokenStorage>(
   (ref) => SecureTokenStorage(ref.watch(secureStorageProvider)),
 );
 
-final authInterceptorProvider = Provider<AuthInterceptor>((ref) {
+final devicePlatformProvider = Provider<String>(
+  (ref) => Platform.operatingSystem,
+);
+
+final deviceCredentialStorageProvider = Provider<DeviceCredentialStorage>(
+  (ref) => DeviceCredentialStorage(ref.watch(secureStorageProvider)),
+);
+
+final deviceIdentityDioProvider = Provider<Dio>((ref) {
   final config = ref.watch(appConfigProvider);
+  return Dio(
+    BaseOptions(
+      baseUrl: config.apiBaseUrl,
+      connectTimeout: const Duration(seconds: 15),
+      receiveTimeout: const Duration(seconds: 15),
+    ),
+  );
+});
+
+final deviceIdentityApiProvider = Provider<DeviceIdentityApi>(
+  (ref) => DioDeviceIdentityApi(ref.watch(deviceIdentityDioProvider)),
+);
+
+final deviceIdentitySessionProvider = Provider<DeviceIdentitySession>(
+  (ref) => DeviceIdentitySession(
+    api: ref.watch(deviceIdentityApiProvider),
+    storage: ref.watch(deviceCredentialStorageProvider),
+    deviceName: 'SonicRelay ${ref.watch(devicePlatformProvider)} viewer',
+    platform: ref.watch(devicePlatformProvider),
+  ),
+);
+
+final authInterceptorProvider = Provider<AuthInterceptor>((ref) {
   return AuthInterceptor(
-    tokenStorage: ref.watch(tokenStorageProvider),
-    refreshDio: createRefreshDio(config),
+    deviceIdentitySession: ref.watch(deviceIdentitySessionProvider),
+    replayDio: ref.watch(deviceIdentityDioProvider),
   );
 });
 
@@ -146,13 +180,8 @@ final sessionsApiProvider = Provider<SessionsApi>(
 final sessionsRepositoryProvider = Provider<SessionsRepository>(
   (ref) => SessionsRepository(
     api: ref.watch(sessionsApiProvider),
-    devicesRepository: ref.watch(devicesRepositoryProvider),
     config: ref.watch(appConfigProvider),
   ),
-);
-
-final devicePlatformProvider = Provider<String>(
-  (ref) => Platform.operatingSystem,
 );
 
 final webSocketClientProvider = Provider<WebSocketClient>(
@@ -162,7 +191,7 @@ final webSocketClientProvider = Provider<WebSocketClient>(
 final signalingClientProvider = Provider<SignalingClient>(
   (ref) => SignalingClient(
     webSocketClient: ref.watch(webSocketClientProvider),
-    tokenStorage: ref.watch(tokenStorageProvider),
+    deviceIdentitySession: ref.watch(deviceIdentitySessionProvider),
   ),
 );
 
@@ -226,7 +255,9 @@ class BackgroundPlaybackNotifier extends Notifier<bool> {
 
 /// The platform foreground service: a real `mediaPlayback` service on Android,
 /// a no-op everywhere else (and in tests).
-final foregroundStreamServiceProvider = Provider<ForegroundStreamService>((ref) {
+final foregroundStreamServiceProvider = Provider<ForegroundStreamService>((
+  ref,
+) {
   final service = Platform.isAndroid
       ? AndroidForegroundStreamServiceBridge()
       : NoopForegroundStreamService();
@@ -242,8 +273,7 @@ final streamLifecycleControllerProvider = Provider<StreamLifecycleController>((
   final controller = StreamLifecycleController(
     service: ref.watch(foregroundStreamServiceProvider),
     keepPlayingInBackground: () => ref.read(backgroundPlaybackEnabledProvider),
-    onStopRequested: () =>
-        ref.read(listenerViewModelProvider.notifier).leave(),
+    onStopRequested: () => ref.read(listenerViewModelProvider.notifier).leave(),
     onReconnectRequested: () =>
         ref.read(listenerViewModelProvider.notifier).reconnect(),
   );

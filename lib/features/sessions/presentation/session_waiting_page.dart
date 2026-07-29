@@ -35,30 +35,14 @@ class _SessionWaitingPageState extends ConsumerState<SessionWaitingPage> {
     final session = ref.read(joinSessionViewModelProvider).session;
     if (session == null) return;
 
-    final deviceId = await ref
-        .read(devicesRepositoryProvider)
-        .readCurrentDeviceId();
-    sonicLog(
-      'Waiting',
-      'start sessionId=${session.sessionId} deviceId=$deviceId',
-    );
-    if (deviceId == null || deviceId.isEmpty) {
-      sonicLog('Waiting', 'no device id -> cannot connect');
-      if (mounted) {
-        setState(
-          () => _error =
-              'This viewer is not registered yet. Rejoin to continue.',
-        );
-      }
-      return;
-    }
+    sonicLog('Waiting', 'start sessionId=${session.sessionId}');
 
     try {
       // Instantiating the notifier wires the signaling -> receiver bridge
       // before the socket opens, then connect() starts the handshake.
       await ref
           .read(listenerViewModelProvider.notifier)
-          .connect(session: session, deviceId: deviceId);
+          .connect(session: session);
     } catch (error) {
       sonicLog('Waiting', 'connect failed: $error');
       if (mounted) {

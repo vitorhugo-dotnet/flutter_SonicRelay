@@ -1,19 +1,19 @@
-import 'dart:async';
-
 import 'package:dio/dio.dart';
 
-import '../../features/auth/data/dto/login_response.dart';
-import '../../features/auth/domain/auth_session.dart';
-import '../storage/secure_token_storage.dart';
+import '../../features/device_identity/data/device_identity_session.dart';
 
 class AuthInterceptor extends Interceptor {
-  AuthInterceptor({required TokenStorage tokenStorage, required Dio refreshDio})
-    : _tokenStorage = tokenStorage,
-      _refreshDio = refreshDio;
+  AuthInterceptor({
+    required DeviceIdentitySession deviceIdentitySession,
+    required Dio replayDio,
+  }) : _deviceIdentitySession = deviceIdentitySession,
+       _replayDio = replayDio;
 
-  final TokenStorage _tokenStorage;
-  final Dio _refreshDio;
-  Future<AuthSession?>? _refreshing;
+  final DeviceIdentitySession _deviceIdentitySession;
+  final Dio _replayDio;
+
+  // Kept temporarily for the legacy auth view model. Device identity failures
+  // are handled by the device setup flow and never invoke this callback.
   void Function()? onSessionExpired;
 
   @override
@@ -21,14 +21,25 @@ class AuthInterceptor extends Interceptor {
     RequestOptions options,
     RequestInterceptorHandler handler,
   ) async {
-    if (options.extra['skipAuth'] != true) {
-      final session = await _tokenStorage.read();
-      if (session != null) {
-        options.headers['Authorization'] =
-            '${session.tokenType} ${session.accessToken}';
-      }
+    if (options.extra['skipAuth'] == true) {
+      handler.next(options);
+      return;
     }
-    handler.next(options);
+
+    try {
+      final token = await _deviceIdentitySession.accessToken();
+      options.headers['Authorization'] = 'DeviceBearer $token';
+      handler.next(options);
+    } catch (error, stackTrace) {
+      handler.reject(
+        DioException(
+          requestOptions: options,
+          error: error,
+          stackTrace: stackTrace,
+          type: DioExceptionType.unknown,
+        ),
+      );
+    }
   }
 
   @override
@@ -36,50 +47,30 @@ class AuthInterceptor extends Interceptor {
     final request = err.requestOptions;
     if (err.response?.statusCode != 401 ||
         request.extra['skipAuth'] == true ||
-        request.extra['authRetried'] == true) {
+        request.extra['authRetried'] == true ||
+        !_isReplaySafe(request)) {
       handler.next(err);
       return;
     }
 
-    final session = await _refreshOnce();
-    if (session == null) {
-      handler.next(err);
-      return;
-    }
-
-    request.extra['authRetried'] = true;
-    request.headers['Authorization'] =
-        '${session.tokenType} ${session.accessToken}';
     try {
-      handler.resolve(await _refreshDio.fetch<dynamic>(request));
+      final token = await _deviceIdentitySession.accessToken(
+        forceRefresh: true,
+      );
+      request.extra['authRetried'] = true;
+      request.headers['Authorization'] = 'DeviceBearer $token';
+      handler.resolve(await _replayDio.fetch<dynamic>(request));
     } on DioException catch (retryError) {
       handler.next(retryError);
-    }
-  }
-
-  Future<AuthSession?> _refreshOnce() {
-    final pending = _refreshing;
-    if (pending != null) return pending;
-    final future = _refresh();
-    _refreshing = future;
-    return future.whenComplete(() => _refreshing = null);
-  }
-
-  Future<AuthSession?> _refresh() async {
-    final current = await _tokenStorage.read();
-    if (current == null) return null;
-    try {
-      final response = await _refreshDio.post<Map<String, dynamic>>(
-        '/auth/refresh',
-        data: {'refreshToken': current.refreshToken},
-      );
-      final session = LoginResponse.fromJson(response.data!).toSession();
-      await _tokenStorage.write(session);
-      return session;
     } catch (_) {
-      await _tokenStorage.clear();
-      onSessionExpired?.call();
-      return null;
+      handler.next(err);
     }
+  }
+
+  bool _isReplaySafe(RequestOptions request) {
+    final method = request.method.toUpperCase();
+    return method == 'GET' ||
+        method == 'HEAD' ||
+        request.extra['replaySafe'] == true;
   }
 }

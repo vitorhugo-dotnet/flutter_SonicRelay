@@ -2,9 +2,8 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:sonic_relay/core/storage/secure_token_storage.dart';
 import 'package:sonic_relay/core/websocket/websocket_client.dart';
-import 'package:sonic_relay/features/auth/domain/auth_session.dart';
+import 'package:sonic_relay/features/device_identity/data/device_identity_session.dart';
 import 'package:sonic_relay/features/sessions/domain/stream_session.dart';
 import 'package:sonic_relay/features/signaling/data/signaling_client.dart';
 import 'package:sonic_relay/features/signaling/domain/signaling_message_type.dart';
@@ -29,18 +28,19 @@ class FakeWebSocketConnection implements WebSocketConnection {
   void emit(String data) => _controller.add(data);
 }
 
-class FakeTokenStorage implements TokenStorage {
-  FakeTokenStorage(this._session);
-  AuthSession? _session;
+class MutableDeviceIdentitySession implements DeviceIdentitySession {
+  String token = 'token-abc';
+
+  final List<bool> forceRefreshes = [];
 
   @override
-  Future<AuthSession?> read() async => _session;
+  Future<String> accessToken({bool forceRefresh = false}) async {
+    forceRefreshes.add(forceRefresh);
+    return token;
+  }
 
   @override
-  Future<void> write(AuthSession session) async => _session = session;
-
-  @override
-  Future<void> clear() async => _session = null;
+  Future<void> reset() async {}
 }
 
 Timer _instantTimer(Duration delay, void Function() callback) =>
@@ -55,6 +55,7 @@ void main() {
   late FakeWebSocketConnection connection;
   late SignalingClient signalingClient;
   late StreamSession session;
+  late MutableDeviceIdentitySession identity;
 
   setUp(() {
     requestedUris = [];
@@ -68,50 +69,59 @@ void main() {
       },
       scheduleTimer: _instantTimer,
     );
+    identity = MutableDeviceIdentitySession();
     signalingClient = SignalingClient(
       webSocketClient: webSocketClient,
-      tokenStorage: FakeTokenStorage(
-        const AuthSession(
-          accessToken: 'token-abc',
-          refreshToken: 'refresh',
-          expiresIn: 3600,
-          tokenType: 'Bearer',
-        ),
-      ),
+      deviceIdentitySession: identity,
     );
     session = StreamSession(
       sessionId: 'session-1',
       signalingUrl: Uri.parse(
-        'wss://stream.example/ws/signaling?sessionId=session-1',
+        'wss://stream.example/ws/signaling?deviceId=legacy&unexpected=value',
       ),
     );
   });
 
   tearDown(() => signalingClient.dispose());
 
-  test('connects with sessionId/deviceId query params and bearer auth', () async {
-    await signalingClient.connect(session: session, deviceId: 'device-9');
+  test('connects with only sessionId and DeviceBearer auth', () async {
+    await signalingClient.connect(session: session);
     await Future<void>.delayed(Duration.zero);
 
     expect(requestedUris, hasLength(1));
     final uri = requestedUris.single;
-    expect(uri.queryParameters['sessionId'], 'session-1');
-    expect(uri.queryParameters['deviceId'], 'device-9');
-    expect(requestedHeaders.single['Authorization'], 'Bearer token-abc');
+    expect(uri.queryParameters, {'sessionId': 'session-1'});
+    expect(requestedHeaders.single['Authorization'], 'DeviceBearer token-abc');
+  });
+
+  test('reconnect obtains a fresh DeviceBearer token', () async {
+    await signalingClient.connect(session: session);
+    await Future<void>.delayed(Duration.zero);
+    identity.token = 'token-2';
+
+    await connection.close();
+    for (var i = 0; i < 6 && requestedHeaders.length < 2; i++) {
+      await Future<void>.delayed(Duration.zero);
+    }
+
+    expect(requestedHeaders, hasLength(2));
+    expect(requestedHeaders[0]['Authorization'], 'DeviceBearer token-abc');
+    expect(requestedHeaders[1]['Authorization'], 'DeviceBearer token-2');
+    expect(identity.forceRefreshes, [false, true]);
   });
 
   test('does not auto-send viewer.ready on connect', () async {
     // `viewer.ready` is a routed message the backend rejects without a `to`
     // recipient. It is now sent by the WebRTC receiver in reply to
     // `publisher.ready`, not automatically on socket open.
-    await signalingClient.connect(session: session, deviceId: 'device-9');
+    await signalingClient.connect(session: session);
     await Future<void>.delayed(Duration.zero);
 
     expect(connection.sent, isEmpty);
   });
 
   test('sends a targeted message via send()', () async {
-    await signalingClient.connect(session: session, deviceId: 'device-9');
+    await signalingClient.connect(session: session);
     await Future<void>.delayed(Duration.zero);
 
     signalingClient.send(
@@ -128,7 +138,7 @@ void main() {
   });
 
   test('replies with pong when the server sends a ping', () async {
-    await signalingClient.connect(session: session, deviceId: 'device-9');
+    await signalingClient.connect(session: session);
     await Future<void>.delayed(Duration.zero);
 
     connection.emit(
@@ -150,7 +160,7 @@ void main() {
   });
 
   test('session.ended closes the connection and stops reconnecting', () async {
-    await signalingClient.connect(session: session, deviceId: 'device-9');
+    await signalingClient.connect(session: session);
     await Future<void>.delayed(Duration.zero);
 
     final states = <SignalingConnectionState>[];
@@ -176,7 +186,7 @@ void main() {
   });
 
   test('forwards unknown message types without throwing', () async {
-    await signalingClient.connect(session: session, deviceId: 'device-9');
+    await signalingClient.connect(session: session);
     await Future<void>.delayed(Duration.zero);
 
     final messageFuture = signalingClient.messages.first;

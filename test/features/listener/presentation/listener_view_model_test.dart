@@ -3,10 +3,9 @@ import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sonic_relay/app/di/app_providers.dart';
-import 'package:sonic_relay/core/storage/secure_token_storage.dart';
 import 'package:sonic_relay/core/webrtc/rtc_peer_connection_factory.dart';
 import 'package:sonic_relay/core/websocket/websocket_client.dart';
-import 'package:sonic_relay/features/auth/domain/auth_session.dart';
+import 'package:sonic_relay/features/device_identity/data/device_identity_session.dart';
 import 'package:sonic_relay/features/listener/data/audio_receiver_service.dart';
 import 'package:sonic_relay/features/listener/presentation/listener_view_model.dart';
 import 'package:sonic_relay/features/sessions/domain/stream_session.dart';
@@ -42,56 +41,55 @@ class FakeWebSocketConnection implements WebSocketConnection {
   }
 }
 
-class FakeTokenStorage implements TokenStorage {
+class FakeDeviceIdentitySession implements DeviceIdentitySession {
   @override
-  Future<AuthSession?> read() async => null;
+  Future<String> accessToken({bool forceRefresh = false}) async => 'token-1';
 
   @override
-  Future<void> write(AuthSession session) async {}
-
-  @override
-  Future<void> clear() async {}
+  Future<void> reset() async {}
 }
 
 void main() {
-  test('leave tears down the receiver and closes the signaling socket', () async {
-    final audio = FakeAudioReceiverService();
-    late FakeWebSocketConnection connection;
-    final webSocketClient = WebSocketClient(
-      connector: (uri, headers) async {
-        connection = FakeWebSocketConnection();
-        return connection;
-      },
-      scheduleTimer: (delay, callback) => Timer(Duration.zero, callback),
-    );
-    final signalingClient = SignalingClient(
-      webSocketClient: webSocketClient,
-      tokenStorage: FakeTokenStorage(),
-    );
+  test(
+    'leave tears down the receiver and closes the signaling socket',
+    () async {
+      final audio = FakeAudioReceiverService();
+      late FakeWebSocketConnection connection;
+      final webSocketClient = WebSocketClient(
+        connector: (uri, headers) async {
+          connection = FakeWebSocketConnection();
+          return connection;
+        },
+        scheduleTimer: (delay, callback) => Timer(Duration.zero, callback),
+      );
+      final signalingClient = SignalingClient(
+        webSocketClient: webSocketClient,
+        deviceIdentitySession: FakeDeviceIdentitySession(),
+      );
 
-    final container = ProviderContainer(
-      overrides: [
-        audioReceiverServiceProvider.overrideWithValue(audio),
-        signalingClientProvider.overrideWithValue(signalingClient),
-      ],
-    );
-    addTearDown(container.dispose);
+      final container = ProviderContainer(
+        overrides: [
+          audioReceiverServiceProvider.overrideWithValue(audio),
+          signalingClientProvider.overrideWithValue(signalingClient),
+        ],
+      );
+      addTearDown(container.dispose);
 
-    // Force the receiver + view model to build and subscribe.
-    container.read(listenerViewModelProvider);
+      // Force the receiver + view model to build and subscribe.
+      container.read(listenerViewModelProvider);
 
-    await signalingClient.connect(
-      session: StreamSession(
-        sessionId: 'session-1',
-        signalingUrl: Uri.parse('wss://stream.example/ws/signaling'),
-      ),
-      deviceId: 'device-1',
-    );
-    await Future<void>.delayed(Duration.zero);
+      await signalingClient.connect(
+        session: StreamSession(
+          sessionId: 'session-1',
+          signalingUrl: Uri.parse('wss://stream.example/ws/signaling'),
+        ),
+      );
+      await Future<void>.delayed(Duration.zero);
 
-    await container.read(listenerViewModelProvider.notifier).leave();
+      await container.read(listenerViewModelProvider.notifier).leave();
 
-    expect(audio.stopCount, greaterThanOrEqualTo(1));
-    expect(connection.closed, isTrue);
-  });
+      expect(audio.stopCount, greaterThanOrEqualTo(1));
+      expect(connection.closed, isTrue);
+    },
+  );
 }

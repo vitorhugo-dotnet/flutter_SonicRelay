@@ -3,61 +3,64 @@ import 'dart:typed_data';
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sonic_relay/core/http/auth_interceptor.dart';
-import 'package:sonic_relay/core/storage/secure_token_storage.dart';
-import 'package:sonic_relay/features/auth/domain/auth_session.dart';
+import 'package:sonic_relay/features/device_identity/data/device_identity_session.dart';
 
-class MemoryTokenStorage implements TokenStorage {
-  MemoryTokenStorage(this.value);
-  AuthSession? value;
+class FakeDeviceIdentitySession implements DeviceIdentitySession {
+  FakeDeviceIdentitySession(List<String> tokens)
+    : _tokens = List<String>.from(tokens);
+
+  final List<String> _tokens;
+  final List<bool> forceRefreshes = [];
+
   @override
-  Future<void> clear() async => value = null;
+  Future<String> accessToken({bool forceRefresh = false}) async {
+    forceRefreshes.add(forceRefresh);
+    return _tokens.removeAt(0);
+  }
+
   @override
-  Future<AuthSession?> read() async => value;
-  @override
-  Future<void> write(AuthSession session) async => value = session;
+  Future<void> reset() async {}
 }
 
 class CallbackAdapter implements HttpClientAdapter {
   CallbackAdapter(this.callback);
+
   final ResponseBody Function(RequestOptions options) callback;
+
   @override
   Future<ResponseBody> fetch(
     RequestOptions options,
     Stream<Uint8List>? requestStream,
     Future<void>? cancelFuture,
   ) async => callback(options);
+
   @override
   void close({bool force = false}) {}
 }
 
-ResponseBody jsonResponse(String body, int status) => ResponseBody.fromString(
-  body,
-  status,
-  headers: {
-    Headers.contentTypeHeader: [Headers.jsonContentType],
-  },
-);
-
 void main() {
-  const oldSession = AuthSession(
-    accessToken: 'old',
-    refreshToken: 'refresh',
-    expiresIn: 1,
-    tokenType: 'Bearer',
-  );
+  test('adds a DeviceBearer token to an authenticated request', () async {
+    final identity = FakeDeviceIdentitySession(['token-1']);
+    final dio = Dio(BaseOptions(baseUrl: 'https://example.test'));
+    dio.httpClientAdapter = CallbackAdapter((options) {
+      expect(options.headers['Authorization'], 'DeviceBearer token-1');
+      return ResponseBody.fromString('ok', 200);
+    });
+    dio.interceptors.add(
+      AuthInterceptor(deviceIdentitySession: identity, replayDio: Dio()),
+    );
 
-  test('401 refreshes tokens and retries the original request once', () async {
-    final storage = MemoryTokenStorage(oldSession);
-    final refreshDio = Dio(BaseOptions(baseUrl: 'https://example.test'));
-    refreshDio.httpClientAdapter = CallbackAdapter((options) {
-      if (options.path == '/auth/refresh') {
-        return jsonResponse(
-          '{"accessToken":"new","refreshToken":"new-refresh",'
-          '"expiresIn":3600,"tokenType":"Bearer"}',
-          200,
-        );
-      }
-      expect(options.headers['Authorization'], 'Bearer new');
+    final response = await dio.get<String>('/protected');
+
+    expect(response.statusCode, 200);
+    expect(identity.forceRefreshes, [false]);
+  });
+
+  test('401 forces one exchange and replays a GET once', () async {
+    final identity = FakeDeviceIdentitySession(['token-1', 'token-2']);
+    final replayDio = Dio(BaseOptions(baseUrl: 'https://example.test'));
+    replayDio.httpClientAdapter = CallbackAdapter((options) {
+      expect(options.headers['Authorization'], 'DeviceBearer token-2');
       return ResponseBody.fromString('ok', 200);
     });
     final dio = Dio(BaseOptions(baseUrl: 'https://example.test'));
@@ -65,38 +68,63 @@ void main() {
       (_) => ResponseBody.fromString('unauthorized', 401),
     );
     dio.interceptors.add(
-      AuthInterceptor(tokenStorage: storage, refreshDio: refreshDio),
+      AuthInterceptor(deviceIdentitySession: identity, replayDio: replayDio),
     );
 
     final response = await dio.get<String>('/protected');
 
     expect(response.statusCode, 200);
-    expect(storage.value?.accessToken, 'new');
+    expect(identity.forceRefreshes, [false, true]);
   });
 
-  test('failed refresh clears tokens and expires the session', () async {
-    final storage = MemoryTokenStorage(oldSession);
-    final refreshDio = Dio(BaseOptions(baseUrl: 'https://example.test'));
-    refreshDio.httpClientAdapter = CallbackAdapter(
-      (_) => ResponseBody.fromString('unauthorized', 401),
-    );
-    final interceptor = AuthInterceptor(
-      tokenStorage: storage,
-      refreshDio: refreshDio,
-    );
-    var expired = false;
-    interceptor.onSessionExpired = () => expired = true;
+  test('401 does not replay an unsafe POST', () async {
+    final identity = FakeDeviceIdentitySession(['token-1', 'token-2']);
+    var replayCalls = 0;
+    final replayDio = Dio(BaseOptions(baseUrl: 'https://example.test'));
+    replayDio.httpClientAdapter = CallbackAdapter((_) {
+      replayCalls++;
+      return ResponseBody.fromString('ok', 200);
+    });
     final dio = Dio(BaseOptions(baseUrl: 'https://example.test'));
     dio.httpClientAdapter = CallbackAdapter(
       (_) => ResponseBody.fromString('unauthorized', 401),
     );
-    dio.interceptors.add(interceptor);
+    dio.interceptors.add(
+      AuthInterceptor(deviceIdentitySession: identity, replayDio: replayDio),
+    );
 
     await expectLater(
-      dio.get<String>('/protected'),
+      dio.post<String>('/unsafe', data: {'value': 1}),
       throwsA(isA<DioException>()),
     );
-    expect(storage.value, isNull);
-    expect(expired, isTrue);
+
+    expect(replayCalls, 0);
+    expect(identity.forceRefreshes, [false]);
+  });
+
+  test('replaySafe explicitly permits one POST replay', () async {
+    final identity = FakeDeviceIdentitySession(['token-1', 'token-2']);
+    final replayDio = Dio(BaseOptions(baseUrl: 'https://example.test'));
+    replayDio.httpClientAdapter = CallbackAdapter((options) {
+      expect(options.method, 'POST');
+      expect(options.headers['Authorization'], 'DeviceBearer token-2');
+      return ResponseBody.fromString('ok', 200);
+    });
+    final dio = Dio(BaseOptions(baseUrl: 'https://example.test'));
+    dio.httpClientAdapter = CallbackAdapter(
+      (_) => ResponseBody.fromString('unauthorized', 401),
+    );
+    dio.interceptors.add(
+      AuthInterceptor(deviceIdentitySession: identity, replayDio: replayDio),
+    );
+
+    final response = await dio.post<String>(
+      '/safe',
+      data: {'value': 1},
+      options: Options(extra: const {'replaySafe': true}),
+    );
+
+    expect(response.statusCode, 200);
+    expect(identity.forceRefreshes, [false, true]);
   });
 }

@@ -2,9 +2,9 @@ import 'dart:async';
 import 'dart:math';
 
 import '../../../core/diagnostics/sonic_log.dart';
-import '../../../core/storage/secure_token_storage.dart';
 import '../../../core/websocket/websocket_client.dart';
 import '../../../core/websocket/websocket_message.dart';
+import '../../device_identity/data/device_identity_session.dart';
 import '../../sessions/domain/stream_session.dart';
 import '../domain/signaling_message.dart';
 import '../domain/signaling_message_type.dart';
@@ -27,11 +27,11 @@ enum SignalingConnectionState {
 class SignalingClient {
   SignalingClient({
     required WebSocketClient webSocketClient,
-    required TokenStorage tokenStorage,
+    required DeviceIdentitySession deviceIdentitySession,
     SignalingMessageMapper mapper = const SignalingMessageMapper(),
     Random? random,
   }) : _webSocketClient = webSocketClient,
-       _tokenStorage = tokenStorage,
+       _deviceIdentitySession = deviceIdentitySession,
        _mapper = mapper,
        _random = random ?? Random() {
     _connectionSubscription = _webSocketClient.connectionState.listen(
@@ -41,7 +41,7 @@ class SignalingClient {
   }
 
   final WebSocketClient _webSocketClient;
-  final TokenStorage _tokenStorage;
+  final DeviceIdentitySession _deviceIdentitySession;
   final SignalingMessageMapper _mapper;
   final Random _random;
 
@@ -54,56 +54,79 @@ class SignalingClient {
   late final StreamSubscription<WebSocketMessage> _messageSubscription;
 
   StreamSession? _session;
-  String? _deviceId;
   bool _leaving = false;
+  bool _refreshingReconnect = false;
 
   Stream<SignalingConnectionState> get connectionState =>
       _connectionStateController.stream;
 
   Stream<SignalingMessage> get messages => _messageController.stream;
 
-  /// Connects to [session.signalingUrl] with [sessionId] and [deviceId] as
-  /// query parameters and the current access token as a bearer header.
-  Future<void> connect({
-    required StreamSession session,
-    required String deviceId,
-  }) async {
+  /// Connects to [session.signalingUrl] with only [sessionId] in the query and
+  /// the current device access token as a bearer header.
+  Future<void> connect({required StreamSession session}) async {
     _session = session;
-    _deviceId = deviceId;
     _leaving = false;
 
-    final authSession = await _tokenStorage.read();
-    final headers = <String, String>{
-      if (authSession != null)
-        'Authorization': '${authSession.tokenType} ${authSession.accessToken}',
-    };
-
-    final uri = _buildUri(session.signalingUrl, session.sessionId, deviceId);
-    sonicLog(
-      'Signaling',
-      'connect sessionId=${session.sessionId} deviceId=$deviceId '
-          'hasToken=${authSession != null} uri=$uri',
-    );
-    await _webSocketClient.connect(uri, headers: headers);
+    await _connectWithCurrentToken(forceRefresh: false);
   }
 
-  Uri _buildUri(Uri base, String sessionId, String deviceId) {
-    final params = Map<String, String>.from(base.queryParameters);
-    params['sessionId'] = sessionId;
-    params['deviceId'] = deviceId;
-    return base.replace(queryParameters: params);
+  Future<void> _connectWithCurrentToken({required bool forceRefresh}) async {
+    final session = _session;
+    if (session == null || _leaving) return;
+    final token = await _deviceIdentitySession.accessToken(
+      forceRefresh: forceRefresh,
+    );
+    if (_leaving) return;
+    final uri = _buildUri(session.signalingUrl, session.sessionId);
+    sonicLog('Signaling', 'connect sessionId=${session.sessionId} uri=$uri');
+    await _webSocketClient.connect(
+      uri,
+      headers: {'Authorization': 'DeviceBearer $token'},
+    );
+  }
+
+  Uri _buildUri(Uri base, String sessionId) {
+    return base.replace(queryParameters: {'sessionId': sessionId});
   }
 
   void _handleTransportState(WebSocketConnectionState state) {
     switch (state) {
       case WebSocketConnectionState.connecting:
-        _connectionStateController.add(SignalingConnectionState.connecting);
+        _connectionStateController.add(
+          _refreshingReconnect
+              ? SignalingConnectionState.reconnecting
+              : SignalingConnectionState.connecting,
+        );
       case WebSocketConnectionState.connected:
         _connectionStateController.add(SignalingConnectionState.connected);
       case WebSocketConnectionState.reconnecting:
         _connectionStateController.add(SignalingConnectionState.reconnecting);
+        if (!_leaving && !_refreshingReconnect) {
+          unawaited(_reconnectWithFreshToken());
+        }
       case WebSocketConnectionState.disconnected:
+        if (!_refreshingReconnect) {
+          _connectionStateController.add(SignalingConnectionState.disconnected);
+        }
+    }
+  }
+
+  Future<void> _reconnectWithFreshToken() async {
+    _refreshingReconnect = true;
+    await _webSocketClient.disconnect();
+    if (_leaving) {
+      _refreshingReconnect = false;
+      return;
+    }
+    try {
+      await _connectWithCurrentToken(forceRefresh: true);
+    } catch (_) {
+      if (!_leaving) {
         _connectionStateController.add(SignalingConnectionState.disconnected);
+      }
+    } finally {
+      _refreshingReconnect = false;
     }
   }
 
@@ -131,13 +154,20 @@ class SignalingClient {
   /// the WebRTC layer to forward `viewer.ready`, `webrtc.answer` and local
   /// `webrtc.ice_candidate` messages, each addressed to a publisher participant.
   /// No-op if there is no active session.
-  void send(SignalingMessageType type, Map<String, Object?> payload, {String? to}) =>
-      _send(type, payload, to: to);
+  void send(
+    SignalingMessageType type,
+    Map<String, Object?> payload, {
+    String? to,
+  }) => _send(type, payload, to: to);
 
   void _sendPong(SignalingMessage ping) =>
       _send(SignalingMessageType.pong, const {}, to: ping.from);
 
-  void _send(SignalingMessageType type, Map<String, Object?> payload, {String? to}) {
+  void _send(
+    SignalingMessageType type,
+    Map<String, Object?> payload, {
+    String? to,
+  }) {
     final session = _session;
     if (session == null) return;
     sonicLog('Signaling', 'send type=${type.wireValue} to=$to');
@@ -145,7 +175,7 @@ class SignalingClient {
       type: type,
       messageId: _generateMessageId(),
       sessionId: session.sessionId,
-      from: _deviceId,
+      from: null,
       to: to,
       timestamp: DateTime.now().toUtc(),
       payload: payload,
