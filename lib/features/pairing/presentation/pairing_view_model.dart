@@ -16,6 +16,7 @@ class PairingState {
     this.pairingCode = '',
     this.status = PairingStatus.idle,
     this.pairings = const [],
+    this.revokingPairingIds = const {},
     this.errorMessage,
   });
 
@@ -23,6 +24,7 @@ class PairingState {
   final String pairingCode;
   final PairingStatus status;
   final List<DevicePairing> pairings;
+  final Set<String> revokingPairingIds;
   final String? errorMessage;
 
   bool get isBusy =>
@@ -33,16 +35,31 @@ final pairingRepositoryProvider = Provider<PairingRepository>(
   (ref) => PairingRepository(api: DioPairingApi(ref.watch(dioProvider))),
 );
 
+typedef CurrentPairingDeviceIdLoader = Future<String?> Function();
+
+final currentPairingDeviceIdProvider = Provider<CurrentPairingDeviceIdLoader>((
+  ref,
+) {
+  final identitySession = ref.watch(deviceIdentitySessionProvider);
+  final credentialStorage = ref.watch(deviceCredentialStorageProvider);
+  return () async {
+    await identitySession.accessToken();
+    return (await credentialStorage.read())?.deviceId;
+  };
+});
+
 final pairingViewModelProvider =
     NotifierProvider<PairingViewModel, PairingState>(PairingViewModel.new);
 
 class PairingViewModel extends Notifier<PairingState> {
   late final PairingRepository _repository;
-  bool _scanAccepted = false;
+  late final CurrentPairingDeviceIdLoader _currentDeviceId;
+  bool _scanSubmissionInFlight = false;
 
   @override
   PairingState build() {
     _repository = ref.watch(pairingRepositoryProvider);
+    _currentDeviceId = ref.watch(currentPairingDeviceIdProvider);
     return const PairingState();
   }
 
@@ -51,6 +68,7 @@ class PairingViewModel extends Notifier<PairingState> {
       challengeId: value.trim(),
       pairingCode: state.pairingCode,
       pairings: state.pairings,
+      revokingPairingIds: state.revokingPairingIds,
     );
   }
 
@@ -59,6 +77,7 @@ class PairingViewModel extends Notifier<PairingState> {
       challengeId: state.challengeId,
       pairingCode: value.trim().toUpperCase(),
       pairings: state.pairings,
+      revokingPairingIds: state.revokingPairingIds,
     );
   }
 
@@ -76,6 +95,7 @@ class PairingViewModel extends Notifier<PairingState> {
         challengeId: state.challengeId,
         pairingCode: state.pairingCode,
         pairings: state.pairings,
+        revokingPairingIds: state.revokingPairingIds,
         status: PairingStatus.failed,
         errorMessage: 'Enter a valid challenge ID and pairing code.',
       );
@@ -85,7 +105,7 @@ class PairingViewModel extends Notifier<PairingState> {
   }
 
   Future<void> completeScanned(String raw) async {
-    if (_scanAccepted) return;
+    if (_scanSubmissionInFlight) return;
 
     PairingChallengePayload payload;
     try {
@@ -95,14 +115,19 @@ class PairingViewModel extends Notifier<PairingState> {
         challengeId: state.challengeId,
         pairingCode: state.pairingCode,
         pairings: state.pairings,
+        revokingPairingIds: state.revokingPairingIds,
         status: PairingStatus.failed,
         errorMessage: 'Scan a valid SonicRelay pairing QR code.',
       );
       return;
     }
 
-    _scanAccepted = true;
-    await _complete(payload);
+    _scanSubmissionInFlight = true;
+    try {
+      await _complete(payload);
+    } finally {
+      _scanSubmissionInFlight = false;
+    }
   }
 
   Future<void> load(String deviceId) async {
@@ -110,11 +135,15 @@ class PairingViewModel extends Notifier<PairingState> {
       challengeId: state.challengeId,
       pairingCode: state.pairingCode,
       pairings: state.pairings,
+      revokingPairingIds: state.revokingPairingIds,
       status: PairingStatus.loading,
     );
     try {
       final pairings = await _repository.list(deviceId);
-      state = PairingState(pairings: pairings);
+      state = PairingState(
+        pairings: pairings,
+        revokingPairingIds: state.revokingPairingIds,
+      );
     } on PairingFailure catch (error) {
       _setFailure(error.message);
     } catch (_) {
@@ -122,19 +151,52 @@ class PairingViewModel extends Notifier<PairingState> {
     }
   }
 
+  Future<void> loadCurrentPairings() async {
+    try {
+      final deviceId = await _currentDeviceId();
+      if (deviceId != null) await load(deviceId);
+    } catch (_) {
+      _setFailure('Unable to load device pairings. Please retry.');
+    }
+  }
+
   Future<void> revoke(String pairingId) async {
+    if (state.revokingPairingIds.contains(pairingId)) return;
+    state = PairingState(
+      challengeId: state.challengeId,
+      pairingCode: state.pairingCode,
+      status: state.status,
+      pairings: state.pairings,
+      revokingPairingIds: Set.unmodifiable({
+        ...state.revokingPairingIds,
+        pairingId,
+      }),
+      errorMessage: state.errorMessage,
+    );
+
+    String? failureMessage;
     try {
       await _repository.revoke(pairingId);
-      state = PairingState(
-        pairings: state.pairings
-            .where((pairing) => pairing.pairingId != pairingId)
-            .toList(growable: false),
-      );
     } on PairingFailure catch (error) {
-      _setFailure(error.message);
+      failureMessage = error.message;
     } catch (_) {
-      _setFailure('Unable to revoke device pairing. Please retry.');
+      failureMessage = 'Unable to revoke device pairing. Please retry.';
     }
+
+    final remaining = Set<String>.of(state.revokingPairingIds)
+      ..remove(pairingId);
+    state = PairingState(
+      challengeId: state.challengeId,
+      pairingCode: state.pairingCode,
+      status: failureMessage == null ? state.status : PairingStatus.failed,
+      pairings: failureMessage == null
+          ? state.pairings
+                .where((pairing) => pairing.pairingId != pairingId)
+                .toList(growable: false)
+          : state.pairings,
+      revokingPairingIds: Set.unmodifiable(remaining),
+      errorMessage: failureMessage ?? state.errorMessage,
+    );
   }
 
   Future<void> _complete(PairingChallengePayload payload) async {
@@ -143,6 +205,7 @@ class PairingViewModel extends Notifier<PairingState> {
       challengeId: state.challengeId,
       pairingCode: state.pairingCode,
       pairings: state.pairings,
+      revokingPairingIds: state.revokingPairingIds,
       status: PairingStatus.submitting,
     );
     try {
@@ -153,7 +216,11 @@ class PairingViewModel extends Notifier<PairingState> {
           (existing) => existing.pairingId != pairing.pairingId,
         ),
       ];
-      state = PairingState(status: PairingStatus.paired, pairings: pairings);
+      state = PairingState(
+        status: PairingStatus.paired,
+        pairings: pairings,
+        revokingPairingIds: state.revokingPairingIds,
+      );
     } on PairingFailure catch (error) {
       _setFailure(error.message);
     } catch (_) {
@@ -166,6 +233,7 @@ class PairingViewModel extends Notifier<PairingState> {
       challengeId: state.challengeId,
       pairingCode: state.pairingCode,
       pairings: state.pairings,
+      revokingPairingIds: state.revokingPairingIds,
       status: PairingStatus.failed,
       errorMessage: message,
     );

@@ -1,14 +1,33 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'pairing_view_model.dart';
 import 'qr_scanner_page.dart';
 
-class PairingPage extends ConsumerWidget {
+class PairingPage extends ConsumerStatefulWidget {
   const PairingPage({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<PairingPage> createState() => _PairingPageState();
+}
+
+class _PairingPageState extends ConsumerState<PairingPage> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        unawaited(
+          ref.read(pairingViewModelProvider.notifier).loadCurrentPairings(),
+        );
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final state = ref.watch(pairingViewModelProvider);
     final viewModel = ref.read(pairingViewModelProvider.notifier);
 
@@ -92,10 +111,21 @@ class PairingPage extends ConsumerWidget {
                   title: Text('Publisher ${pairing.publisherDeviceId}'),
                   subtitle: Text(pairing.status),
                   trailing: TextButton(
-                    onPressed: state.isBusy
+                    onPressed:
+                        state.isBusy ||
+                            state.revokingPairingIds.contains(pairing.pairingId)
                         ? null
-                        : () => viewModel.revoke(pairing.pairingId),
-                    child: const Text('Revoke'),
+                        : () => _confirmRevoke(
+                            context,
+                            viewModel,
+                            pairing.pairingId,
+                          ),
+                    child: state.revokingPairingIds.contains(pairing.pairingId)
+                        ? const SizedBox.square(
+                            dimension: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Text('Revoke'),
                   ),
                 ),
             ],
@@ -120,5 +150,32 @@ class PairingPage extends ConsumerWidget {
         ),
       ),
     );
+  }
+
+  Future<void> _confirmRevoke(
+    BuildContext context,
+    PairingViewModel viewModel,
+    String pairingId,
+  ) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Revoke pairing?'),
+        content: const Text(
+          'This device will need a new pairing code before joining future sessions.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Revoke pairing'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true) await viewModel.revoke(pairingId);
   }
 }
