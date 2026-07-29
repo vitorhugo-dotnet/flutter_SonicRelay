@@ -8,6 +8,8 @@
          whole process (SIGABRT in jvm.cc) rather than surfacing as a Dart error. -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE"/>
+    <!-- Requested only when the user opens the device-pairing QR scanner. -->
+    <uses-permission android:name="android.permission.CAMERA"/>
     <!-- Keep the viewer alive while backgrounded during an active stream via a
          mediaPlayback foreground service (issue #13). Android 14+ requires both
          the base and the type-specific permission. POST_NOTIFICATIONS (13+) is
