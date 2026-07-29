@@ -99,10 +99,10 @@ class ListenerViewModel extends Notifier<ListenerState> {
   /// publisher (invoked from the background notification's "Reconnect" action).
   Future<void> reconnect() => _receiver.reconnect();
 
-  /// Leaves the session: tears down the peer connection/audio and closes the
-  /// signaling socket.
+  /// Leaves the session: invalidates signaling first so no late token, socket,
+  /// or offer can race with peer-connection/audio teardown.
   Future<void> leave() async {
-    await _receiver.leave();
     await _signaling.leave();
+    await _receiver.leave();
   }
 }
