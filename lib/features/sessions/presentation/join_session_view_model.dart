@@ -1,7 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../app/di/app_providers.dart';
-import '../../auth/presentation/login_view_model.dart';
 import '../data/sessions_repository.dart';
 import '../domain/stream_session.dart';
 
@@ -68,13 +67,15 @@ class JoinSessionViewModel extends Notifier<JoinSessionState> {
         session: session,
       );
     } on SessionsFailure catch (error) {
+      var message = error.message;
       if (error.kind == SessionsFailureKind.unauthorized) {
-        ref.read(authViewModelProvider.notifier).expireSession();
+        message = 'Your device identity is no longer authorized.';
+        ref.read(deviceReadinessProvider.notifier).requireDeviceSetup(message);
       }
       state = JoinSessionState(
         code: state.code,
         status: JoinSessionStatus.failed,
-        errorMessage: error.message,
+        errorMessage: message,
         retryable:
             error.kind == SessionsFailureKind.network ||
             error.kind == SessionsFailureKind.missingDevice ||

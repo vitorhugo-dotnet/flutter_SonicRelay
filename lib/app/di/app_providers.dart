@@ -26,6 +26,9 @@ import '../../features/device_identity/data/device_identity_session.dart';
 import '../../features/devices/data/device_id_storage.dart';
 import '../../features/devices/data/devices_api.dart';
 import '../../features/devices/data/devices_repository.dart';
+import '../../features/pairing/data/pairing_api.dart';
+import '../../features/pairing/data/pairing_repository.dart';
+import '../../features/pairing/domain/device_pairing.dart';
 import '../../features/sessions/data/sessions_api.dart';
 import '../../features/sessions/data/sessions_repository.dart';
 import '../../features/listener/data/audio_receiver_service.dart';
@@ -133,6 +136,142 @@ final deviceIdentitySessionProvider = Provider<DeviceIdentitySession>(
   ),
 );
 
+enum DeviceReadinessStatus { restoring, deviceSetup, pairingRequired, ready }
+
+class DeviceReadinessState {
+  const DeviceReadinessState.restoring()
+    : status = DeviceReadinessStatus.restoring,
+      errorMessage = null,
+      requiresReset = false;
+
+  const DeviceReadinessState.deviceSetup({
+    this.errorMessage,
+    this.requiresReset = false,
+  }) : status = DeviceReadinessStatus.deviceSetup;
+
+  const DeviceReadinessState.pairingRequired()
+    : status = DeviceReadinessStatus.pairingRequired,
+      errorMessage = null,
+      requiresReset = false;
+
+  const DeviceReadinessState.ready()
+    : status = DeviceReadinessStatus.ready,
+      errorMessage = null,
+      requiresReset = false;
+
+  final DeviceReadinessStatus status;
+  final String? errorMessage;
+  final bool requiresReset;
+}
+
+final deviceReadinessProvider =
+    NotifierProvider<DeviceReadinessNotifier, DeviceReadinessState>(
+      DeviceReadinessNotifier.new,
+    );
+
+class DeviceReadinessNotifier extends Notifier<DeviceReadinessState> {
+  late DeviceIdentitySession _identitySession;
+  late DeviceCredentialStorage _credentialStorage;
+  late PairingRepository _pairingRepository;
+  Future<void>? _initialization;
+
+  @override
+  DeviceReadinessState build() {
+    _identitySession = ref.watch(deviceIdentitySessionProvider);
+    _credentialStorage = ref.watch(deviceCredentialStorageProvider);
+    _pairingRepository = ref.watch(pairingRepositoryProvider);
+    Future<void>.microtask(initialize);
+    return const DeviceReadinessState.restoring();
+  }
+
+  Future<void> initialize() {
+    final existing = _initialization;
+    if (existing != null) return existing;
+
+    late final Future<void> current;
+    current = _initialize().whenComplete(() {
+      if (identical(_initialization, current)) _initialization = null;
+    });
+    _initialization = current;
+    return current;
+  }
+
+  Future<void> retry() async {
+    final requiresReset = state.requiresReset;
+    state = const DeviceReadinessState.restoring();
+    if (requiresReset) await _identitySession.reset();
+    await initialize();
+  }
+
+  Future<void> resetAndInitialize() async {
+    state = const DeviceReadinessState.restoring();
+    await _identitySession.reset();
+    await initialize();
+  }
+
+  void syncPairings(Iterable<DevicePairing> pairings) {
+    if (state.status == DeviceReadinessStatus.restoring ||
+        state.status == DeviceReadinessStatus.deviceSetup) {
+      return;
+    }
+    _setPairingReadiness(pairings);
+  }
+
+  void requireDeviceSetup([String? message]) {
+    state = DeviceReadinessState.deviceSetup(
+      errorMessage: message,
+      requiresReset: true,
+    );
+  }
+
+  Future<void> _initialize() async {
+    try {
+      final existingCredential = await _credentialStorage.read();
+      if (existingCredential == null) {
+        state = const DeviceReadinessState.deviceSetup();
+      }
+
+      await _identitySession.accessToken();
+      final credential = await _credentialStorage.read();
+      if (credential == null) {
+        state = const DeviceReadinessState.deviceSetup(
+          errorMessage: 'Unable to prepare this device. Please retry.',
+        );
+        return;
+      }
+
+      _setPairingReadiness(await _pairingRepository.list(credential.deviceId));
+    } on DeviceCredentialStorageException catch (error) {
+      state = DeviceReadinessState.deviceSetup(
+        errorMessage: error.message,
+        requiresReset: true,
+      );
+    } on DeviceIdentitySessionInvalidatedException {
+      state = const DeviceReadinessState.deviceSetup(
+        errorMessage: 'This device identity must be reset.',
+        requiresReset: true,
+      );
+    } on DioException catch (error) {
+      state = DeviceReadinessState.deviceSetup(
+        errorMessage: 'Unable to prepare this device. Please retry.',
+        requiresReset: error.response?.statusCode == 401,
+      );
+    } on PairingFailure catch (error) {
+      state = DeviceReadinessState.deviceSetup(errorMessage: error.message);
+    } catch (_) {
+      state = const DeviceReadinessState.deviceSetup(
+        errorMessage: 'Unable to prepare this device. Please retry.',
+      );
+    }
+  }
+
+  void _setPairingReadiness(Iterable<DevicePairing> pairings) {
+    state = pairings.any((pairing) => pairing.status == 'active')
+        ? const DeviceReadinessState.ready()
+        : const DeviceReadinessState.pairingRequired();
+  }
+}
+
 final authInterceptorProvider = Provider<AuthInterceptor>((ref) {
   return AuthInterceptor(
     deviceIdentitySession: ref.watch(deviceIdentitySessionProvider),
@@ -146,6 +285,10 @@ final dioProvider = Provider<Dio>((ref) {
     ref.watch(authInterceptorProvider),
   );
 });
+
+final pairingRepositoryProvider = Provider<PairingRepository>(
+  (ref) => PairingRepository(api: DioPairingApi(ref.watch(dioProvider))),
+);
 
 final authApiProvider = Provider<AuthApi>(
   (ref) => DioAuthApi(ref.watch(dioProvider)),

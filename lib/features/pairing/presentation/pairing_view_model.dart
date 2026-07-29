@@ -3,10 +3,11 @@ import 'dart:convert';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../app/di/app_providers.dart';
-import '../data/pairing_api.dart';
 import '../data/pairing_repository.dart';
 import '../domain/device_pairing.dart';
 import '../domain/pairing_challenge_payload.dart';
+
+export '../../../app/di/app_providers.dart' show pairingRepositoryProvider;
 
 enum PairingStatus { idle, loading, submitting, paired, failed }
 
@@ -30,10 +31,6 @@ class PairingState {
   bool get isBusy =>
       status == PairingStatus.loading || status == PairingStatus.submitting;
 }
-
-final pairingRepositoryProvider = Provider<PairingRepository>(
-  (ref) => PairingRepository(api: DioPairingApi(ref.watch(dioProvider))),
-);
 
 typedef CurrentPairingDeviceIdLoader = Future<String?> Function();
 

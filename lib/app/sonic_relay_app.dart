@@ -4,7 +4,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'di/app_providers.dart';
 import 'router/app_router.dart';
 import 'theme/app_theme.dart';
-import '../features/devices/presentation/devices_view_model.dart';
 
 class SonicRelayApp extends ConsumerStatefulWidget {
   const SonicRelayApp({super.key});
@@ -39,7 +38,7 @@ class _SonicRelayAppState extends ConsumerState<SonicRelayApp>
 
   @override
   Widget build(BuildContext context) {
-    ref.watch(devicesViewModelProvider);
+    ref.watch(deviceReadinessProvider);
     return MaterialApp.router(
       title: 'SonicRelay',
       debugShowCheckedModeBanner: false,

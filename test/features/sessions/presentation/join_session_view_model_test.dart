@@ -1,7 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sonic_relay/app/di/app_providers.dart';
-import 'package:sonic_relay/features/auth/presentation/login_view_model.dart';
 import 'package:sonic_relay/features/sessions/data/sessions_repository.dart';
 import 'package:sonic_relay/features/sessions/domain/stream_session.dart';
 import 'package:sonic_relay/features/sessions/presentation/join_session_view_model.dart';
@@ -26,16 +25,16 @@ class FakeSessionsRepository implements SessionsRepository {
   }
 }
 
-class AuthenticatedAuthViewModel extends AuthViewModel {
+class ReadyDeviceReadinessNotifier extends DeviceReadinessNotifier {
   @override
-  AuthState build() => const AuthState.authenticated();
+  DeviceReadinessState build() => const DeviceReadinessState.ready();
 }
 
 ProviderContainer createContainer(FakeSessionsRepository repository) {
   return ProviderContainer(
     overrides: [
       sessionsRepositoryProvider.overrideWithValue(repository),
-      authViewModelProvider.overrideWith(AuthenticatedAuthViewModel.new),
+      deviceReadinessProvider.overrideWith(ReadyDeviceReadinessNotifier.new),
     ],
   );
 }
@@ -77,23 +76,29 @@ void main() {
     expect(state.status, JoinSessionStatus.joined);
   });
 
-  test('unauthorized join expires authentication', () async {
-    final repository = FakeSessionsRepository()
-      ..failure = const SessionsFailure(
-        SessionsFailureKind.unauthorized,
-        'Your session has expired. Please sign in again.',
+  test(
+    'unauthorized join returns to device setup without account fallback',
+    () async {
+      final repository = FakeSessionsRepository()
+        ..failure = const SessionsFailure(
+          SessionsFailureKind.unauthorized,
+          'Your device identity is no longer authorized.',
+        );
+      final container = createContainer(repository);
+      addTearDown(container.dispose);
+      final viewModel = container.read(joinSessionViewModelProvider.notifier);
+
+      viewModel.updateCode('ABC123');
+      await viewModel.join();
+
+      expect(
+        container.read(deviceReadinessProvider).status,
+        DeviceReadinessStatus.deviceSetup,
       );
-    final container = createContainer(repository);
-    addTearDown(container.dispose);
-    final viewModel = container.read(joinSessionViewModelProvider.notifier);
-
-    viewModel.updateCode('ABC123');
-    await viewModel.join();
-
-    expect(container.read(authViewModelProvider).isAuthenticated, isFalse);
-    expect(
-      container.read(joinSessionViewModelProvider).errorMessage,
-      'Your session has expired. Please sign in again.',
-    );
-  });
+      expect(
+        container.read(joinSessionViewModelProvider).errorMessage,
+        'Your device identity is no longer authorized.',
+      );
+    },
+  );
 }

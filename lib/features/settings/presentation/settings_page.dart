@@ -1,13 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
+import '../../../app/di/app_providers.dart';
 import '../../../app/theme/app_colors.dart';
 import '../../../app/theme/app_spacing.dart';
 import '../../../core/widgets/sonic_button.dart';
 import '../../../core/widgets/sonic_card.dart';
-import '../../auth/presentation/login_view_model.dart';
-import '../../devices/presentation/devices_view_model.dart';
-import '../../devices/presentation/widgets/device_card.dart';
 import 'widgets/keep_playing_toggle.dart';
 import 'widgets/relay_mode_toggle.dart';
 import 'widgets/server_url_field.dart';
@@ -17,7 +16,6 @@ class SettingsPage extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final devices = ref.watch(devicesViewModelProvider);
     return Scaffold(
       appBar: AppBar(title: const Text('Settings')),
       body: SafeArea(
@@ -35,7 +33,7 @@ class SettingsPage extends ConsumerWidget {
                   ),
                   const SizedBox(height: AppSpacing.sm),
                   Text(
-                    'Integration settings will become available in a future release.',
+                    'This viewer uses its own secure device identity.',
                     style: Theme.of(context).textTheme.bodyMedium,
                   ),
                   const SizedBox(height: AppSpacing.lg),
@@ -57,7 +55,10 @@ class SettingsPage extends ConsumerWidget {
                           subtitle: 'ICE transport',
                         ),
                         const SizedBox(height: AppSpacing.sm),
-                        const RelayModeToggle(),
+                        const Material(
+                          color: Colors.transparent,
+                          child: RelayModeToggle(),
+                        ),
                         const Divider(height: AppSpacing.xl),
                         const _SettingsRow(
                           icon: Icons.headset_outlined,
@@ -65,7 +66,10 @@ class SettingsPage extends ConsumerWidget {
                           subtitle: 'Background audio',
                         ),
                         const SizedBox(height: AppSpacing.sm),
-                        const KeepPlayingToggle(),
+                        const Material(
+                          color: Colors.transparent,
+                          child: KeepPlayingToggle(),
+                        ),
                         const Divider(height: AppSpacing.xl),
                         const _SettingsRow(
                           icon: Icons.dark_mode_outlined,
@@ -76,67 +80,28 @@ class SettingsPage extends ConsumerWidget {
                     ),
                   ),
                   const SizedBox(height: AppSpacing.xl),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          'Your devices',
-                          style: Theme.of(context).textTheme.headlineSmall,
-                        ),
-                      ),
-                      IconButton(
-                        tooltip: 'Refresh devices',
-                        onPressed: devices.isLoading
-                            ? null
-                            : () => ref
-                                  .read(devicesViewModelProvider.notifier)
-                                  .refresh(),
-                        icon: const Icon(Icons.refresh_rounded),
-                      ),
-                    ],
-                  ),
-                  if (devices.isLoading) ...[
-                    const SizedBox(height: AppSpacing.sm),
-                    const LinearProgressIndicator(),
-                  ],
-                  if (devices.errorMessage case final message?) ...[
-                    const SizedBox(height: AppSpacing.sm),
-                    Text(
-                      message,
-                      style: TextStyle(
-                        color: Theme.of(context).colorScheme.error,
-                      ),
-                    ),
-                  ],
-                  if (!devices.isLoading &&
-                      devices.errorMessage == null &&
-                      devices.devices.isEmpty) ...[
-                    const SizedBox(height: AppSpacing.sm),
-                    Text(
-                      'No registered devices found.',
-                      style: Theme.of(context).textTheme.bodyMedium,
-                    ),
-                  ],
-                  for (final device in devices.devices) ...[
-                    const SizedBox(height: AppSpacing.sm),
-                    DeviceCard(
-                      device: device,
-                      isCurrent: device.id == devices.currentDeviceId,
-                    ),
-                  ],
-                  const SizedBox(height: AppSpacing.xl),
                   SonicButton(
-                    label: 'Log out',
-                    icon: Icons.logout_rounded,
+                    label: 'Manage pairings',
+                    icon: Icons.link_rounded,
                     isSecondary: true,
-                    onPressed: () =>
-                        ref.read(authViewModelProvider.notifier).logout(),
+                    onPressed: () => context.push('/pair'),
                   ),
                   const SizedBox(height: AppSpacing.md),
-                  const _DeleteAccountButton(),
+                  SonicButton(
+                    label: 'Reset device identity',
+                    icon: Icons.restart_alt_rounded,
+                    isSecondary: true,
+                    onPressed: () => _confirmReset(context, ref),
+                  ),
+                  const SizedBox(height: AppSpacing.sm),
+                  Text(
+                    'Resetting removes this device credential and requires a new pairing before future sessions.',
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
                   const SizedBox(height: AppSpacing.md),
                   const Text(
-                    'SonicRelay mobile viewer · UI preview',
+                    'SonicRelay mobile viewer',
                     textAlign: TextAlign.center,
                     style: TextStyle(color: AppColors.textSecondary),
                   ),
@@ -148,80 +113,31 @@ class SettingsPage extends ConsumerWidget {
       ),
     );
   }
-}
 
-class _DeleteAccountButton extends ConsumerStatefulWidget {
-  const _DeleteAccountButton();
-
-  @override
-  ConsumerState<_DeleteAccountButton> createState() =>
-      _DeleteAccountButtonState();
-}
-
-class _DeleteAccountButtonState extends ConsumerState<_DeleteAccountButton> {
-  bool _isDeleting = false;
-
-  Future<void> _confirmAndDelete() async {
-    final theme = Theme.of(context);
+  Future<void> _confirmReset(BuildContext context, WidgetRef ref) async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('Delete account?'),
+        title: const Text('Reset device identity?'),
         content: const Text(
-          'This permanently disables your SonicRelay account. Your devices and '
-          'active sessions are revoked and you will be signed out. This cannot '
-          'be undone.',
+          'The secure credential stored on this device will be removed. '
+          'You must pair again before joining another session.',
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(false),
             child: const Text('Cancel'),
           ),
-          TextButton(
-            style: TextButton.styleFrom(foregroundColor: theme.colorScheme.error),
+          FilledButton(
             onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text('Delete'),
+            child: const Text('Reset'),
           ),
         ],
       ),
     );
-    if (confirmed != true) return;
-
-    setState(() => _isDeleting = true);
-    final error = await ref.read(authViewModelProvider.notifier).deleteAccount();
-    if (!mounted) return;
-    setState(() => _isDeleting = false);
-    if (error != null) {
-      ScaffoldMessenger.of(context)
-        ..hideCurrentSnackBar()
-        ..showSnackBar(SnackBar(content: Text(error)));
+    if (confirmed == true) {
+      await ref.read(deviceReadinessProvider.notifier).resetAndInitialize();
     }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final errorColor = Theme.of(context).colorScheme.error;
-    return SizedBox(
-      width: double.infinity,
-      child: OutlinedButton.icon(
-        onPressed: _isDeleting ? null : _confirmAndDelete,
-        style: OutlinedButton.styleFrom(
-          foregroundColor: errorColor,
-          side: BorderSide(color: errorColor.withValues(alpha: 0.6)),
-          minimumSize: const Size.fromHeight(54),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-          ),
-        ),
-        icon: _isDeleting
-            ? const SizedBox.square(
-                dimension: 20,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              )
-            : const Icon(Icons.delete_forever_rounded, size: 20),
-        label: Text(_isDeleting ? 'Deleting…' : 'Delete account'),
-      ),
-    );
   }
 }
 
