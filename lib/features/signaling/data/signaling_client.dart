@@ -76,6 +76,8 @@ class SignalingClient {
         );
         return {'Authorization': 'DeviceBearer $token'};
       },
+      shouldReconnectOnError: (error) =>
+          error is! DeviceIdentitySessionInvalidatedException,
     );
   }
 

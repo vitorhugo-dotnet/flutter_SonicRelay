@@ -28,6 +28,8 @@ typedef WebSocketConnector =
 typedef WebSocketHeadersProvider =
     Future<Map<String, String>> Function(bool isReconnect);
 
+typedef WebSocketReconnectPredicate = bool Function(Object error);
+
 /// Default [WebSocketConnector] backed by `dart:io`'s [WebSocket].
 Future<WebSocketConnection> ioWebSocketConnector(
   Uri uri,
@@ -110,11 +112,13 @@ class WebSocketClient {
   Uri? _uri;
   Map<String, String> _headers = const {};
   WebSocketHeadersProvider? _headersProvider;
+  WebSocketReconnectPredicate _shouldReconnectOnError = (_) => true;
 
   Future<void> connect(
     Uri uri, {
     Map<String, String> headers = const {},
     WebSocketHeadersProvider? headersProvider,
+    WebSocketReconnectPredicate? shouldReconnectOnError,
   }) async {
     final generation = ++_generation;
     _stopped = false;
@@ -137,6 +141,7 @@ class WebSocketClient {
     _uri = uri;
     _headers = headers;
     _headersProvider = headersProvider;
+    _shouldReconnectOnError = shouldReconnectOnError ?? (_) => true;
     _attempt = 0;
     await _attemptConnect(generation);
   }
@@ -183,6 +188,11 @@ class WebSocketClient {
     } catch (error) {
       if (!_isCurrent(generation)) return;
       sonicLog('WebSocket', 'connect failed: $error');
+      if (!_shouldReconnectOnError(error)) {
+        _stopped = true;
+        _stateController.add(WebSocketConnectionState.disconnected);
+        return;
+      }
       _scheduleReconnect(generation);
     }
   }

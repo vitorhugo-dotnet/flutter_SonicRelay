@@ -22,11 +22,13 @@ class DeviceIdentitySession {
     required String deviceName,
     required String platform,
     DateTime Function()? now,
+    void Function()? onInvalidated,
   }) : _api = api,
        _storage = storage,
        _deviceName = deviceName,
        _platform = platform,
-       _now = now ?? DateTime.now;
+       _now = now ?? DateTime.now,
+       _onInvalidated = onInvalidated;
 
   static const _deviceType = 'flutter_viewer';
   static const _expiryMargin = Duration(seconds: 30);
@@ -36,6 +38,7 @@ class DeviceIdentitySession {
   final String _deviceName;
   final String _platform;
   final DateTime Function() _now;
+  final void Function()? _onInvalidated;
 
   DeviceAccessToken? _cachedToken;
   Future<String>? _inFlight;
@@ -106,6 +109,8 @@ class DeviceIdentitySession {
         _invalidated = true;
         _cachedToken = null;
         await _storage.clear();
+        _onInvalidated?.call();
+        throw const DeviceIdentitySessionInvalidatedException();
       }
       rethrow;
     }

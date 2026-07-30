@@ -1,10 +1,17 @@
 import 'dart:async';
 
+import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sonic_relay/app/di/app_providers.dart';
+import 'package:sonic_relay/app/router/app_router.dart';
 import 'package:sonic_relay/features/device_identity/data/device_credential_storage.dart';
+import 'package:sonic_relay/features/device_identity/data/device_identity_api.dart';
 import 'package:sonic_relay/features/device_identity/data/device_identity_session.dart';
+import 'package:sonic_relay/features/device_identity/data/dto/bootstrap_device_request.dart';
+import 'package:sonic_relay/features/device_identity/data/dto/bootstrap_device_response.dart';
+import 'package:sonic_relay/features/device_identity/data/dto/device_token_request.dart';
+import 'package:sonic_relay/features/device_identity/data/dto/device_token_response.dart';
 import 'package:sonic_relay/features/device_identity/domain/device_credential.dart';
 import 'package:sonic_relay/features/pairing/data/pairing_repository.dart';
 import 'package:sonic_relay/features/pairing/domain/device_pairing.dart';
@@ -137,6 +144,54 @@ void main() {
       );
     },
   );
+
+  test(
+    'token revocation invalidates readiness and redirects an active listener',
+    () async {
+      final storage = _MemoryCredentialStorage()..credential = _credential;
+      final api = _RevocableDeviceIdentityApi();
+      final repository = _FakePairingRepository()
+        ..pairings = [
+          DevicePairing(
+            pairingId: 'pairing-1',
+            publisherDeviceId: 'publisher-1',
+            viewerDeviceId: 'viewer-1',
+            status: 'active',
+            createdAt: DateTime.utc(2026, 7, 29),
+          ),
+        ];
+      final container = ProviderContainer(
+        overrides: [
+          deviceCredentialStorageProvider.overrideWithValue(storage),
+          deviceIdentityApiProvider.overrideWithValue(api),
+          pairingRepositoryProvider.overrideWithValue(repository),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      container.read(deviceReadinessProvider);
+      await Future<void>.delayed(Duration.zero);
+      await Future<void>.delayed(Duration.zero);
+      expect(
+        container.read(deviceReadinessProvider).status,
+        DeviceReadinessStatus.ready,
+      );
+
+      api.revoked = true;
+      await expectLater(
+        container
+            .read(deviceIdentitySessionProvider)
+            .accessToken(forceRefresh: true),
+        throwsA(isA<DeviceIdentitySessionInvalidatedException>()),
+      );
+      await Future<void>.delayed(Duration.zero);
+
+      final readiness = container.read(deviceReadinessProvider);
+      expect(readiness.status, DeviceReadinessStatus.deviceSetup);
+      expect(readiness.requiresReset, isTrue);
+      expect(deviceIdentityRedirect(readiness, '/listener'), '/device-setup');
+    },
+  );
 }
 
 class _MemoryCredentialStorage implements DeviceCredentialStorage {
@@ -205,4 +260,31 @@ class _FakePairingRepository implements PairingRepository {
 
   @override
   Future<void> revoke(String pairingId) => throw UnimplementedError();
+}
+
+class _RevocableDeviceIdentityApi implements DeviceIdentityApi {
+  bool revoked = false;
+
+  @override
+  Future<BootstrapDeviceResponse> bootstrap(BootstrapDeviceRequest request) =>
+      throw UnimplementedError();
+
+  @override
+  Future<DeviceTokenResponse> token(DeviceTokenRequest request) async {
+    if (revoked) {
+      throw DioException(
+        requestOptions: RequestOptions(path: '/api/devices/token'),
+        response: Response<void>(
+          requestOptions: RequestOptions(path: '/api/devices/token'),
+          statusCode: 401,
+        ),
+        type: DioExceptionType.badResponse,
+      );
+    }
+    return DeviceTokenResponse(
+      accessToken: 'device-token',
+      expiresAt: DateTime.utc(2026, 7, 29, 14),
+      scopes: const ['stream:listen'],
+    );
+  }
 }

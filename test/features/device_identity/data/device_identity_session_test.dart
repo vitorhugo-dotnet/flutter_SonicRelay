@@ -25,13 +25,15 @@ void main() {
     now = DateTime.utc(2026, 7, 29, 12);
   });
 
-  DeviceIdentitySession createSession() => DeviceIdentitySession(
-    api: api,
-    storage: storage,
-    deviceName: 'Pixel 9',
-    platform: 'android',
-    now: () => now,
-  );
+  DeviceIdentitySession createSession({void Function()? onInvalidated}) =>
+      DeviceIdentitySession(
+        api: api,
+        storage: storage,
+        deviceName: 'Pixel 9',
+        platform: 'android',
+        now: () => now,
+        onInvalidated: onInvalidated,
+      );
 
   test('bootstraps an absent credential before exchanging a token', () async {
     api.tokenResponses.add(
@@ -169,6 +171,7 @@ void main() {
   test(
     'token 401 clears the credential and invalidates this session',
     () async {
+      var invalidations = 0;
       await storage.write(_credential);
       final unauthorized = DioException(
         requestOptions: RequestOptions(path: '/api/devices/token'),
@@ -179,11 +182,15 @@ void main() {
         type: DioExceptionType.badResponse,
       );
       api.tokenErrors.add(unauthorized);
-      final session = createSession();
+      final session = createSession(onInvalidated: () => invalidations++);
 
-      await expectLater(session.accessToken(), throwsA(same(unauthorized)));
+      await expectLater(
+        session.accessToken(),
+        throwsA(isA<DeviceIdentitySessionInvalidatedException>()),
+      );
       expect(await storage.read(), isNull);
       expect(api.tokenCalls, 1);
+      expect(invalidations, 1);
 
       await expectLater(
         session.accessToken(),
@@ -207,7 +214,10 @@ void main() {
       ),
     );
     final session = createSession();
-    await expectLater(session.accessToken(), throwsA(isA<DioException>()));
+    await expectLater(
+      session.accessToken(),
+      throwsA(isA<DeviceIdentitySessionInvalidatedException>()),
+    );
 
     await session.reset();
     api.tokenResponses.add(

@@ -195,8 +195,7 @@ While a stream is active, SonicRelay keeps receiving and playing audio when the 
 3. Notification **Open** → returns to the live session with the correct state.
 4. Notification **Stop** → leaves the session and the service stops.
 5. Drop Wi-Fi briefly → "reconnecting" notification; restore → recovers. Leave it off past the window → service stops with a "stream ended" notice.
-6. Log out while streaming → the service stops.
-7. Android 14/15: no `MissingForegroundServiceTypeException` / `SecurityException`.
+6. Android 14/15: no `MissingForegroundServiceTypeException` / `SecurityException`.
 
 ## UI preview
 
@@ -206,9 +205,6 @@ To capture Android screenshots, run an emulator, start the app with `flutter run
 
 ## Known limitations
 
-Surfaced during the 2026-07-06 integration pass (see [docs/integration-flow.md](docs/integration-flow.md)):
-
-- **UI does not yet auto-open signaling.** `/session/waiting` shows the prepared connection context, but wiring join → open-signaling → navigate-to-`/listener` into a single UI flow is not done. The signaling and WebRTC layers are complete and unit-tested behind their view models.
-- **Windows publisher envelope mismatch.** The current [windows_SonicRelay](https://github.com/vitorhugo-java/windows_SonicRelay) signaling envelope serializes a `viewerId` field and sends `publisher.ready` with no recipient, while the backend routes strictly on `to`/`from` participant UUIDs. Until the publisher aligns with the backend protocol, end-to-end audio will not establish. See [docs/troubleshooting.md](docs/troubleshooting.md).
+Current operational constraints (see [docs/integration-flow.md](docs/integration-flow.md)):
 - **Backend-provided TURN in production.** ICE servers, including short-lived TURN credentials, are fetched from `GET /api/webrtc/ice-servers`. The bundled `RtcIceServerConfig.defaults()` fallback (public STUN only, no TURN) is used only when that request fails and the app is a debug build; strict/symmetric NATs will fail to establish a media path in that fallback path.
 - **No live E2E in CI.** Verification is static contract alignment plus `flutter analyze`, `flutter test`, and an Android build — not a live audio session against a running backend and publisher.

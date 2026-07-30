@@ -127,12 +127,26 @@ final deviceIdentityApiProvider = Provider<DeviceIdentityApi>(
   (ref) => DioDeviceIdentityApi(ref.watch(deviceIdentityDioProvider)),
 );
 
+final deviceIdentityInvalidationProvider =
+    NotifierProvider<DeviceIdentityInvalidationNotifier, int>(
+      DeviceIdentityInvalidationNotifier.new,
+    );
+
+class DeviceIdentityInvalidationNotifier extends Notifier<int> {
+  @override
+  int build() => 0;
+
+  void publish() => state += 1;
+}
+
 final deviceIdentitySessionProvider = Provider<DeviceIdentitySession>(
   (ref) => DeviceIdentitySession(
     api: ref.watch(deviceIdentityApiProvider),
     storage: ref.watch(deviceCredentialStorageProvider),
     deviceName: 'SonicRelay ${ref.watch(devicePlatformProvider)} viewer',
     platform: ref.watch(devicePlatformProvider),
+    onInvalidated: () =>
+        ref.read(deviceIdentityInvalidationProvider.notifier).publish(),
   ),
 );
 
@@ -180,6 +194,9 @@ class DeviceReadinessNotifier extends Notifier<DeviceReadinessState> {
     _identitySession = ref.watch(deviceIdentitySessionProvider);
     _credentialStorage = ref.watch(deviceCredentialStorageProvider);
     _pairingRepository = ref.watch(pairingRepositoryProvider);
+    ref.listen(deviceIdentityInvalidationProvider, (_, _) {
+      requireDeviceSetup('This device identity must be reset.');
+    });
     Future<void>.microtask(initialize);
     return const DeviceReadinessState.restoring();
   }

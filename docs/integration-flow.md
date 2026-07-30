@@ -1,15 +1,8 @@
 # Integration flow
 
-The verified end-to-end contract between the Flutter viewer, the backend
-control-plane ([dotnet_SonicRelay](https://github.com/vitorhugo-java/dotnet_SonicRelay))
-and the Windows publisher
-([windows_SonicRelay](https://github.com/vitorhugo-java/windows_SonicRelay)),
-as checked during the 2026-07-06 integration pass.
-
-The backend is the authoritative contract. All request/response shapes below were
-verified against the backend endpoint source and `docs/protocol.md`, cross-checked
-with the backend integration tests, and confirmed against the Flutter client's
-DTOs and signaling envelope.
+This is the Phase 3 end-to-end contract between the Flutter viewer, the
+SonicRelay backend control plane, and the Windows publisher, verified on
+2026-07-29.
 
 ## Configuration
 
@@ -18,69 +11,76 @@ DTOs and signaling envelope.
 | `SONIC_RELAY_API_URL` | `http://localhost:5000` | HTTP API base URL |
 | `SONIC_RELAY_WS_URL` | `ws://localhost:5000` | WebSocket base URL |
 
-The signaling URL is **not** returned by the API. The client builds it as
-`<SONIC_RELAY_WS_URL>/ws/signaling` (`AppConfig.signalingUri`) and the signaling
-client appends `sessionId`/`deviceId`.
-
-Use `https://` / `wss://` in production.
+The join response does not carry a signaling URL. Flutter builds
+`<SONIC_RELAY_WS_URL>/ws/signaling` and appends only `sessionId`. Production
+deployments use `https://` and `wss://`.
 
 ## End-to-end sequence
 
-The MVP happy path — the publisher creates the session and connects first, then
-the viewer joins:
+1. **Prepare device identity.** If secure storage has no credential, Flutter
+   calls `POST /api/devices/bootstrap` with the viewer name, device type
+   `flutter_viewer`, and platform. It stores the returned device id, credential
+   secret, version, type, and platform atomically in `flutter_secure_storage`.
+2. **Obtain a device token.** Flutter exchanges the credential through
+   `POST /api/devices/token`. A single shared `DeviceIdentitySession` caches the
+   short-lived token in memory and supplies it to HTTP and signaling as:
+   `Authorization: DeviceBearer <device_access_token>`.
+3. **Create a pairing challenge.** SonicRelay Windows displays both manual
+   pairing fields and a QR payload containing exactly `challengeId` and `code`.
+   Flutter requests camera access only after the user opens the QR scanner.
+4. **Pair the viewer.** Flutter calls `POST /api/pairings/complete` with the QR
+   or manual challenge. `GET /api/devices/{deviceId}/pairings` discovers active
+   pairings. The router keeps an unpaired viewer on `/pair`.
+5. **Create a stream session.** The paired Windows publisher creates a session
+   and displays a separate temporary session code.
+6. **Join the session.** Flutter calls `POST /api/sessions/join` with only:
 
-1. **Login (viewer).** `POST /auth/login?useCookies=false` with `{email, password}`.
-   Response: `{tokenType, accessToken, expiresIn, refreshToken}` (opaque bearer
-   tokens, not a JWT). Stored via `flutter_secure_storage`.
-2. **Register the viewer device.** `POST /api/devices` with
-   `{name, type:"flutter_viewer", platform:"android"|"ios", publicKey?}` →
-   `201` with the device record. The device UUID is stored separately from tokens.
-3. **Create a session (Windows publisher).** The publisher calls
-   `POST /api/sessions/` with `{sourceDeviceId}` and shows the six-character code.
-4. **Join (viewer).** `POST /api/sessions/join` with `{code, deviceId}`. Response is
-   the full session record (`id`, `status`, `code`, …). The client reads `id` as
-   the session id and builds the signaling URL from config.
-5. **Open signaling (viewer).**
-   `GET /ws/signaling?sessionId={id}&deviceId={deviceId}` with
-   `Authorization: Bearer <access_token>`. The server admits the socket, sends the
-   viewer its own `session.joined` (its participant id), and broadcasts the
-   viewer's `session.joined` to the already-connected publisher.
-6. **Readiness handshake.** The publisher learns of the viewer and sends
-   `publisher.ready` to the viewer's participant. The viewer reads the publisher's
-   participant id from the authenticated `from` field and replies
-   `viewer.ready` addressed to it.
-7. **Offer.** On `viewer.ready`, the publisher creates the peer connection and
-   sends `webrtc.offer` (`payload: {type:"offer", sdp}`) to the viewer.
-8. **Answer.** The viewer applies the remote description, creates an answer, sets
-   the local description and sends `webrtc.answer`
-   (`payload: {type:"answer", sdp}`) back to the publisher.
-9. **ICE.** Both sides trickle `webrtc.ice_candidate`
-   (`payload: {candidate, sdpMid, sdpMLineIndex}`) to each other. Candidates that
-   arrive before the remote description is set are buffered and flushed.
-10. **Audio.** The remote audio track plays through the device output.
-11. **Leave.** On `session.ended`, when the viewer leaves, or on device
-    de-authorization, the peer connection and audio are torn down and the socket
-    is closed.
+   ```json
+   {
+     "code": "ABC123"
+   }
+   ```
 
-## Verified HTTP contracts
+   The backend resolves the authenticated viewer device from `DeviceBearer`
+   and requires an active pairing with the publisher. The response is the full
+   session record; Flutter reads `id` as the session id.
+7. **Open signaling.** Flutter connects with only the session query parameter:
 
-| Method | Route | Request | Response (viewer-relevant) |
+   ```text
+   GET /ws/signaling?sessionId={sessionId}
+   Authorization: DeviceBearer <device_access_token>
+   ```
+
+8. **Negotiate WebRTC.** The publisher sends `publisher.ready`; Flutter replies
+   `viewer.ready` to that participant. Offer, answer, and ICE candidates then
+   use the typed signaling envelope.
+9. **Play audio.** Flutter receives one remote audio track. The backend routes
+   signaling only; media is peer-to-peer or relayed through TURN.
+10. **Leave or revoke.** Explicit leave and `session.ended` tear down signaling,
+    WebRTC, and audio. Pairing revocation blocks future joins but does not end an
+    already active session.
+
+## HTTP contracts
+
+| Method | Route | Request | Result |
 | --- | --- | --- | --- |
-| `POST` | `/auth/login?useCookies=false` | `{email, password}` | `{tokenType, accessToken, expiresIn, refreshToken}` |
-| `POST` | `/auth/refresh` | `{refreshToken}` | same as login |
-| `GET` | `/auth/me` | — | `{id, email, displayName, emailConfirmed, createdAt, lastLoginAt}` |
-| `POST` | `/auth/logout` | — | `204` |
-| `POST` | `/api/devices` | `{name, type, platform, publicKey?}` | `201` device record |
-| `GET` | `/api/devices` | — | device record list |
-| `GET` | `/api/devices/{deviceId}` | — | device record or `404` |
-| `POST` | `/api/sessions/join` | `{code, deviceId}` | session record `{id, status, code, …}` |
+| `POST` | `/api/devices/bootstrap` | `{name, deviceType, platform}` | long-lived device credential |
+| `POST` | `/api/devices/token` | `{deviceId, credentialSecret}` | short-lived token and scopes |
+| `POST` | `/api/pairings/complete` | `{challengeId, code}` | active pairing |
+| `GET` | `/api/devices/{deviceId}/pairings` | — | pairing list |
+| `DELETE` | `/api/pairings/{pairingId}` | — | `204` |
+| `POST` | `/api/sessions/join` | `{"code":"ABC123"}` | session record `{id, status, code, …}` |
 
-A `401` on any authenticated request triggers a single `POST /auth/refresh` and a
-retry; if refresh fails, tokens are cleared and the app returns to `/login`.
+On an API `401`, `AuthInterceptor` forces one credential exchange. Safe GET/HEAD
+requests are replayed once with the new `DeviceBearer` token. Mutating requests
+are never replayed automatically; the current action fails once and a later
+manual action uses the refreshed token. If the credential exchange itself is
+rejected, the session publishes permanent invalidation, secure credentials are
+cleared, and the router moves to `/device-setup`.
 
-## Verified signaling envelope
+## Signaling lifecycle
 
-Every server frame:
+Every server frame follows the typed envelope:
 
 ```json
 {
@@ -89,30 +89,13 @@ Every server frame:
   "sessionId": "<uuid>",
   "from": "<sender-participant-uuid>",
   "to": "<recipient-participant-uuid>",
-  "timestamp": "2026-07-06T14:00:00Z",
+  "timestamp": "2026-07-29T14:00:00Z",
   "payload": {}
 }
 ```
 
-A client only needs to send `type`, `to`, `payload` and optionally `messageId`;
-the server derives `sessionId`, overwrites `from` with the authenticated
-participant and assigns the timestamp. **`to` is a participant id** — not a user,
-device or session id.
-
-Routed types requiring a `to`: `publisher.ready`, `viewer.ready`, `webrtc.offer`,
-`webrtc.answer`, `webrtc.ice_candidate`, `pong`. `ping` needs no recipient.
-Server-generated types: `session.joined`, `session.left`, `session.ended`,
-`error`. Unknown types are preserved and forwarded, never dropped.
-
-## What was fixed in this pass (Flutter side)
-
-- **Join response parsing.** The client previously required `sessionId`/`role`/
-  `signalingUrl` and threw on every real join. It now parses the backend `id`,
-  maps `status`, and builds the signaling URL from config.
-- **`viewer.ready` handshake.** The client previously sent `viewer.ready` with no
-  `to`, on socket open — which the backend rejects (`invalid_recipient`). It now
-  sends `viewer.ready` in reply to `publisher.ready`, addressed to that message's
-  `from` participant.
-
-See [troubleshooting.md](troubleshooting.md) for the outstanding cross-repo
-mismatch and other failure modes.
+Routed messages use participant ids in `to`. `viewer.ready` is sent only in
+reply to `publisher.ready`, addressed to its authenticated `from` participant.
+Transient token/network failures use bounded exponential reconnect attempts. A
+`DeviceIdentitySessionInvalidatedException` is permanent: reconnect stops and
+device readiness routes even an active listener to `/device-setup`.

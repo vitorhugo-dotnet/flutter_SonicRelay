@@ -200,6 +200,53 @@ void main() {
     expect(connectorCalls, 0);
   });
 
+  test(
+    'revoked identity during reconnect stops without another retry',
+    () async {
+      final timers = <ManualTimer>[];
+      final states = <SignalingConnectionState>[];
+      final localIdentity = MutableDeviceIdentitySession();
+      late FakeWebSocketConnection localConnection;
+      var connectorCalls = 0;
+      final webSocketClient = WebSocketClient(
+        connector: (uri, headers) async {
+          connectorCalls++;
+          localConnection = FakeWebSocketConnection();
+          return localConnection;
+        },
+        scheduleTimer: (delay, callback) {
+          final timer = ManualTimer(delay, callback);
+          timers.add(timer);
+          return timer;
+        },
+      );
+      final localClient = SignalingClient(
+        webSocketClient: webSocketClient,
+        deviceIdentitySession: localIdentity,
+      );
+      addTearDown(localClient.dispose);
+      final subscription = localClient.connectionState.listen(states.add);
+      addTearDown(subscription.cancel);
+
+      await localClient.connect(session: session);
+      localIdentity.errors.add(
+        const DeviceIdentitySessionInvalidatedException(),
+      );
+      await localConnection.close();
+      await Future<void>.delayed(Duration.zero);
+      expect(timers, hasLength(1));
+
+      timers.single.fire();
+      await Future<void>.delayed(Duration.zero);
+      await Future<void>.delayed(Duration.zero);
+
+      expect(connectorCalls, 1);
+      expect(localIdentity.forceRefreshes, [false, true]);
+      expect(timers, hasLength(1));
+      expect(states.last, SignalingConnectionState.disconnected);
+    },
+  );
+
   test('a newer session supersedes an in-flight token operation', () async {
     final localIdentity = SupersededDeviceIdentitySession();
     final uris = <Uri>[];

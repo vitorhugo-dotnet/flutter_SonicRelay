@@ -47,8 +47,7 @@ class AuthInterceptor extends Interceptor {
     final request = err.requestOptions;
     if (err.response?.statusCode != 401 ||
         request.extra['skipAuth'] == true ||
-        request.extra['authRetried'] == true ||
-        !_isReplaySafe(request)) {
+        request.extra['authRetried'] == true) {
       handler.next(err);
       return;
     }
@@ -57,6 +56,10 @@ class AuthInterceptor extends Interceptor {
       final token = await _deviceIdentitySession.accessToken(
         forceRefresh: true,
       );
+      if (!_isReplaySafe(request)) {
+        handler.next(err);
+        return;
+      }
       request.extra['authRetried'] = true;
       request.headers['Authorization'] = 'DeviceBearer $token';
       handler.resolve(await _replayDio.fetch<dynamic>(request));

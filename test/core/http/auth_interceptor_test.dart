@@ -11,11 +11,18 @@ class FakeDeviceIdentitySession implements DeviceIdentitySession {
 
   final List<String> _tokens;
   final List<bool> forceRefreshes = [];
+  String? _cachedToken;
+  Object? forceRefreshError;
 
   @override
   Future<String> accessToken({bool forceRefresh = false}) async {
     forceRefreshes.add(forceRefresh);
-    return _tokens.removeAt(0);
+    if (forceRefresh) {
+      if (forceRefreshError case final error?) throw error;
+    } else {
+      if (_cachedToken case final cached?) return cached;
+    }
+    return _cachedToken = _tokens.removeAt(0);
   }
 
   @override
@@ -77,30 +84,76 @@ void main() {
     expect(identity.forceRefreshes, [false, true]);
   });
 
-  test('401 does not replay an unsafe POST', () async {
+  test('401 refreshes but never replays an unsafe pairing POST', () async {
     final identity = FakeDeviceIdentitySession(['token-1', 'token-2']);
     var replayCalls = 0;
+    var mutationCalls = 0;
+    final authorizationHeaders = <String?>[];
     final replayDio = Dio(BaseOptions(baseUrl: 'https://example.test'));
     replayDio.httpClientAdapter = CallbackAdapter((_) {
       replayCalls++;
       return ResponseBody.fromString('ok', 200);
     });
     final dio = Dio(BaseOptions(baseUrl: 'https://example.test'));
-    dio.httpClientAdapter = CallbackAdapter(
-      (_) => ResponseBody.fromString('unauthorized', 401),
-    );
+    dio.httpClientAdapter = CallbackAdapter((options) {
+      mutationCalls++;
+      authorizationHeaders.add(options.headers['Authorization'] as String?);
+      return mutationCalls == 1
+          ? ResponseBody.fromString('unauthorized', 401)
+          : ResponseBody.fromString('ok', 200);
+    });
     dio.interceptors.add(
       AuthInterceptor(deviceIdentitySession: identity, replayDio: replayDio),
     );
 
     await expectLater(
-      dio.post<String>('/unsafe', data: {'value': 1}),
+      dio.post<String>('/api/pairings/complete', data: {'code': 'PAIR1234'}),
       throwsA(isA<DioException>()),
     );
 
     expect(replayCalls, 0);
-    expect(identity.forceRefreshes, [false]);
+    expect(mutationCalls, 1);
+    expect(identity.forceRefreshes, [false, true]);
+
+    final response = await dio.post<String>(
+      '/api/pairings/complete',
+      data: {'code': 'PAIR1234'},
+    );
+
+    expect(response.statusCode, 200);
+    expect(replayCalls, 0);
+    expect(mutationCalls, 2);
+    expect(authorizationHeaders, [
+      'DeviceBearer token-1',
+      'DeviceBearer token-2',
+    ]);
+    expect(identity.forceRefreshes, [false, true, false]);
   });
+
+  test(
+    'unsafe POST refresh propagates permanent identity invalidation',
+    () async {
+      final identity = FakeDeviceIdentitySession(['token-1'])
+        ..forceRefreshError = const DeviceIdentitySessionInvalidatedException();
+      var mutationCalls = 0;
+      final dio = Dio(BaseOptions(baseUrl: 'https://example.test'));
+      dio.httpClientAdapter = CallbackAdapter((_) {
+        mutationCalls++;
+        return ResponseBody.fromString('unauthorized', 401);
+      });
+      dio.interceptors.add(
+        AuthInterceptor(deviceIdentitySession: identity, replayDio: Dio()),
+      );
+
+      await expectLater(
+        dio.post<String>('/api/pairings/complete', data: {'code': 'PAIR1234'}),
+        throwsA(isA<DioException>()),
+      );
+
+      expect(mutationCalls, 1);
+      expect(identity.forceRefreshes, [false, true]);
+    },
+  );
 
   test('replaySafe explicitly permits one POST replay', () async {
     final identity = FakeDeviceIdentitySession(['token-1', 'token-2']);
