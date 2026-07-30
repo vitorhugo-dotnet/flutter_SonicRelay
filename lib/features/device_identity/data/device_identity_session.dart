@@ -42,6 +42,7 @@ class DeviceIdentitySession {
 
   DeviceAccessToken? _cachedToken;
   Future<String>? _inFlight;
+  Future<void> _storageMutationTail = Future<void>.value();
   bool _invalidated = false;
   int _generation = 0;
 
@@ -76,7 +77,10 @@ class DeviceIdentitySession {
     _invalidated = true;
     _cachedToken = null;
     _inFlight = null;
-    await _storage.clear();
+    await _runStorageMutation(() async {
+      _ensureCurrent(generation);
+      await _storage.clear();
+    });
     if (generation == _generation) _invalidated = false;
   }
 
@@ -108,7 +112,10 @@ class DeviceIdentitySession {
         deviceType: _deviceType,
         platform: _platform,
       );
-      await _storage.write(credential);
+      await _runStorageMutation(() async {
+        _ensureCurrent(generation);
+        await _storage.write(credential!);
+      });
       _ensureCurrent(generation);
     }
 
@@ -128,7 +135,10 @@ class DeviceIdentitySession {
         _invalidated = true;
         _cachedToken = null;
         try {
-          await _storage.clear();
+          await _runStorageMutation(() async {
+            _ensureCurrent(generation);
+            await _storage.clear();
+          });
         } catch (_) {
           // Keep the session invalidated. An explicit reset retries cleanup.
         }
@@ -138,6 +148,15 @@ class DeviceIdentitySession {
       }
       rethrow;
     }
+  }
+
+  Future<T> _runStorageMutation<T>(Future<T> Function() mutation) {
+    final result = _storageMutationTail.then((_) => mutation());
+    _storageMutationTail = result.then<void>(
+      (_) {},
+      onError: (Object _, StackTrace _) {},
+    );
+    return result;
   }
 
   void _ensureCurrent(int generation) {

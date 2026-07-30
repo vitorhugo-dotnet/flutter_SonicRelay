@@ -202,6 +202,99 @@ void main() {
     },
   );
 
+  test(
+    'reset serializes behind a pending bootstrap write before B starts',
+    () async {
+      final mutationStorage = _PendingWriteCredentialStorage();
+      addTearDown(() {
+        if (!mutationStorage.releaseFirstWrite.isCompleted) {
+          mutationStorage.releaseFirstWrite.complete();
+        }
+      });
+      api.bootstrapResponses.addAll([
+        _bootstrap('device-a', 'secret-a'),
+        _bootstrap('device-b', 'secret-b'),
+      ]);
+      api.tokenResponses.add(
+        _token('token-b', now.add(const Duration(hours: 1))),
+      );
+      final session = createSession(credentialStorage: mutationStorage);
+      final tokenA = session.accessToken();
+      final tokenAExpectation = expectLater(
+        tokenA,
+        throwsA(isA<DeviceIdentitySessionInvalidatedException>()),
+      );
+      await Future<void>.delayed(Duration.zero);
+      await Future<void>.delayed(Duration.zero);
+      expect(mutationStorage.writeCalls, 1);
+
+      final reset = session.reset();
+      try {
+        await Future<void>.delayed(Duration.zero);
+        expect(mutationStorage.clearCalls, 0);
+      } finally {
+        mutationStorage.releaseFirstWrite.complete();
+      }
+      await tokenAExpectation;
+      await reset;
+
+      expect(await session.accessToken(), 'token-b');
+      expect(api.bootstrapCalls, 2);
+      expect(api.tokenRequests.single.deviceId, 'device-b');
+      expect((await mutationStorage.read())?.deviceId, 'device-b');
+      expect(await session.accessToken(), 'token-b');
+      expect(api.tokenCalls, 1);
+    },
+  );
+
+  test(
+    'reset serializes behind a pending 401 clear before B commits',
+    () async {
+      var invalidations = 0;
+      final mutationStorage = _PendingClearCredentialStorage(_credential);
+      addTearDown(() {
+        if (!mutationStorage.releaseFirstClear.isCompleted) {
+          mutationStorage.releaseFirstClear.complete();
+        }
+      });
+      api.tokenErrors.add(_unauthorizedTokenError());
+      api.bootstrapResponses.add(_bootstrap('device-b', 'secret-b'));
+      api.tokenResponses.add(
+        _token('token-b', now.add(const Duration(hours: 1))),
+      );
+      final session = createSession(
+        credentialStorage: mutationStorage,
+        onInvalidated: () => invalidations++,
+      );
+      final tokenA = session.accessToken();
+      final tokenAExpectation = expectLater(
+        tokenA,
+        throwsA(isA<DeviceIdentitySessionInvalidatedException>()),
+      );
+      await Future<void>.delayed(Duration.zero);
+      await Future<void>.delayed(Duration.zero);
+      expect(mutationStorage.clearCalls, 1);
+
+      final reset = session.reset();
+      try {
+        await Future<void>.delayed(Duration.zero);
+        expect(mutationStorage.clearCalls, 1);
+      } finally {
+        mutationStorage.releaseFirstClear.complete();
+      }
+      await tokenAExpectation;
+      await reset;
+
+      expect(invalidations, 0);
+      expect(await session.accessToken(), 'token-b');
+      expect(api.bootstrapCalls, 1);
+      expect(api.tokenRequests.last.deviceId, 'device-b');
+      expect((await mutationStorage.read())?.deviceId, 'device-b');
+      expect(await session.accessToken(), 'token-b');
+      expect(api.tokenCalls, 2);
+    },
+  );
+
   test('force refresh exchanges a still valid cached token', () async {
     await storage.write(_credential);
     api.tokenResponses.addAll([
@@ -404,10 +497,27 @@ DeviceTokenResponse _token(String value, DateTime expiresAt) =>
       scopes: const ['stream:listen'],
     );
 
+BootstrapDeviceResponse _bootstrap(String deviceId, String secret) =>
+    BootstrapDeviceResponse(
+      deviceId: deviceId,
+      credentialSecret: secret,
+      credentialVersion: 1,
+    );
+
+DioException _unauthorizedTokenError() => DioException(
+  requestOptions: RequestOptions(path: '/api/devices/token'),
+  response: Response<void>(
+    requestOptions: RequestOptions(path: '/api/devices/token'),
+    statusCode: 401,
+  ),
+  type: DioExceptionType.badResponse,
+);
+
 class _FakeDeviceIdentityApi implements DeviceIdentityApi {
   int bootstrapCalls = 0;
   int tokenCalls = 0;
   final List<BootstrapDeviceRequest> bootstrapRequests = [];
+  final List<BootstrapDeviceResponse> bootstrapResponses = [];
   final List<DeviceTokenRequest> tokenRequests = [];
   final List<DeviceTokenResponse> tokenResponses = [];
   final List<Object> tokenErrors = [];
@@ -419,6 +529,9 @@ class _FakeDeviceIdentityApi implements DeviceIdentityApi {
   ) async {
     bootstrapCalls++;
     bootstrapRequests.add(request);
+    if (bootstrapResponses.isNotEmpty) {
+      return bootstrapResponses.removeAt(0);
+    }
     return const BootstrapDeviceResponse(
       deviceId: 'device-1',
       credentialSecret: 'secret-1',
@@ -435,6 +548,50 @@ class _FakeDeviceIdentityApi implements DeviceIdentityApi {
     if (tokenErrors.isNotEmpty) throw tokenErrors.removeAt(0);
     return tokenResponses.removeAt(0);
   }
+}
+
+class _PendingWriteCredentialStorage implements DeviceCredentialStorage {
+  final releaseFirstWrite = Completer<void>();
+  DeviceCredential? credential;
+  int writeCalls = 0;
+  int clearCalls = 0;
+
+  @override
+  Future<void> clear() async {
+    clearCalls++;
+    credential = null;
+  }
+
+  @override
+  Future<DeviceCredential?> read() async => credential;
+
+  @override
+  Future<void> write(DeviceCredential value) async {
+    writeCalls++;
+    if (writeCalls == 1) await releaseFirstWrite.future;
+    credential = value;
+  }
+}
+
+class _PendingClearCredentialStorage implements DeviceCredentialStorage {
+  _PendingClearCredentialStorage(this.credential);
+
+  final releaseFirstClear = Completer<void>();
+  DeviceCredential? credential;
+  int clearCalls = 0;
+
+  @override
+  Future<void> clear() async {
+    clearCalls++;
+    if (clearCalls == 1) await releaseFirstClear.future;
+    credential = null;
+  }
+
+  @override
+  Future<DeviceCredential?> read() async => credential;
+
+  @override
+  Future<void> write(DeviceCredential value) async => credential = value;
 }
 
 class _FailingClearCredentialStorage implements DeviceCredentialStorage {
