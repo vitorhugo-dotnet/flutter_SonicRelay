@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sonic_relay/core/http/auth_interceptor.dart';
+import 'package:sonic_relay/core/http/manual_retry_required_exception.dart';
 import 'package:sonic_relay/features/device_identity/data/device_identity_session.dart';
 
 class FakeDeviceIdentitySession implements DeviceIdentitySession {
@@ -84,7 +85,7 @@ void main() {
     expect(identity.forceRefreshes, [false, true]);
   });
 
-  test('401 refreshes but never replays an unsafe pairing POST', () async {
+  test('401 refreshes but marks an unsafe join POST for manual retry', () async {
     final identity = FakeDeviceIdentitySession(['token-1', 'token-2']);
     var replayCalls = 0;
     var mutationCalls = 0;
@@ -107,8 +108,14 @@ void main() {
     );
 
     await expectLater(
-      dio.post<String>('/api/pairings/complete', data: {'code': 'PAIR1234'}),
-      throwsA(isA<DioException>()),
+      dio.post<String>('/api/sessions/join', data: {'code': 'ABC123'}),
+      throwsA(
+        isA<DioException>().having(
+          (error) => error.error,
+          'manual retry outcome',
+          isA<ManualRetryRequiredException>(),
+        ),
+      ),
     );
 
     expect(replayCalls, 0);
@@ -116,8 +123,8 @@ void main() {
     expect(identity.forceRefreshes, [false, true]);
 
     final response = await dio.post<String>(
-      '/api/pairings/complete',
-      data: {'code': 'PAIR1234'},
+      '/api/sessions/join',
+      data: {'code': 'ABC123'},
     );
 
     expect(response.statusCode, 200);

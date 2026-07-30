@@ -216,14 +216,27 @@ class DeviceReadinessNotifier extends Notifier<DeviceReadinessState> {
   Future<void> retry() async {
     final requiresReset = state.requiresReset;
     state = const DeviceReadinessState.restoring();
-    if (requiresReset) await _identitySession.reset();
+    if (requiresReset && !await _resetIdentity()) return;
     await initialize();
   }
 
   Future<void> resetAndInitialize() async {
     state = const DeviceReadinessState.restoring();
-    await _identitySession.reset();
+    if (!await _resetIdentity()) return;
     await initialize();
+  }
+
+  Future<bool> _resetIdentity() async {
+    try {
+      await _identitySession.reset();
+      return true;
+    } catch (_) {
+      state = const DeviceReadinessState.deviceSetup(
+        errorMessage: 'Unable to reset this device. Please retry.',
+        requiresReset: true,
+      );
+      return false;
+    }
   }
 
   void syncPairings(Iterable<DevicePairing> pairings) {

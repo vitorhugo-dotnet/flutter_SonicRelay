@@ -1,6 +1,7 @@
 import 'package:dio/dio.dart';
 
 import '../../features/device_identity/data/device_identity_session.dart';
+import 'manual_retry_required_exception.dart';
 
 class AuthInterceptor extends Interceptor {
   AuthInterceptor({
@@ -57,7 +58,9 @@ class AuthInterceptor extends Interceptor {
         forceRefresh: true,
       );
       if (!_isReplaySafe(request)) {
-        handler.next(err);
+        handler.next(
+          err.copyWith(error: const ManualRetryRequiredException()),
+        );
         return;
       }
       request.extra['authRetried'] = true;

@@ -101,4 +101,26 @@ void main() {
       );
     },
   );
+
+  test('manual retry join failure keeps device ready and offers retry', () async {
+    final repository = FakeSessionsRepository()
+      ..failure = const SessionsFailure(
+        SessionsFailureKind.manualRetry,
+        'Authorization refreshed. Retry joining the session.',
+      );
+    final container = createContainer(repository);
+    addTearDown(container.dispose);
+    final viewModel = container.read(joinSessionViewModelProvider.notifier);
+
+    viewModel.updateCode('ABC123');
+    await viewModel.join();
+
+    expect(
+      container.read(deviceReadinessProvider).status,
+      DeviceReadinessStatus.ready,
+    );
+    final state = container.read(joinSessionViewModelProvider);
+    expect(state.canRetry, isTrue);
+    expect(state.errorMessage, contains('Retry'));
+  });
 }

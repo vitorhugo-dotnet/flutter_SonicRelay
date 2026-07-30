@@ -1,6 +1,7 @@
 import 'package:dio/dio.dart';
 
 import '../../../app/env/app_config.dart';
+import '../../../core/http/manual_retry_required_exception.dart';
 import '../domain/stream_session.dart';
 import 'dto/join_session_request.dart';
 import 'sessions_api.dart';
@@ -11,6 +12,7 @@ enum SessionsFailureKind {
   expiredCode,
   maxViewers,
   unauthorized,
+  manualRetry,
   network,
   invalidResponse,
 }
@@ -52,6 +54,12 @@ class SessionsRepository {
   }
 
   SessionsFailure _mapDioFailure(DioException error) {
+    if (error.error is ManualRetryRequiredException) {
+      return const SessionsFailure(
+        SessionsFailureKind.manualRetry,
+        'Authorization refreshed. Retry joining the session.',
+      );
+    }
     final status = error.response?.statusCode;
     final data = error.response?.data;
     final text = data is Map

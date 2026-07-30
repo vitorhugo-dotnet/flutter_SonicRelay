@@ -1,6 +1,7 @@
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sonic_relay/app/env/app_config.dart';
+import 'package:sonic_relay/core/http/manual_retry_required_exception.dart';
 import 'package:sonic_relay/features/sessions/data/dto/join_session_request.dart';
 import 'package:sonic_relay/features/sessions/data/dto/join_session_response.dart';
 import 'package:sonic_relay/features/sessions/data/sessions_api.dart';
@@ -18,7 +19,7 @@ class FakeSessionsApi implements SessionsApi {
   }
 }
 
-DioException dioFailure(int status, String code) {
+DioException dioFailure(int status, String code, {Object? error}) {
   final options = RequestOptions(path: '/api/sessions/join');
   return DioException(
     requestOptions: options,
@@ -27,6 +28,7 @@ DioException dioFailure(int status, String code) {
       statusCode: status,
       data: {'code': code},
     ),
+    error: error,
   );
 }
 
@@ -52,6 +54,31 @@ void main() {
     expect(session.sessionId, 'session-1');
     expect(session.signalingUrl, Uri.parse('ws://api.example/ws/signaling'));
     expect(repository.currentSession, same(session));
+  });
+
+  test('maps refreshed unsafe 401 to a typed manual retry failure', () async {
+    api.error = dioFailure(
+      401,
+      'unauthorized',
+      error: const ManualRetryRequiredException(),
+    );
+
+    await expectLater(
+      repository.join('ABC123'),
+      throwsA(
+        isA<SessionsFailure>()
+            .having(
+              (failure) => failure.kind,
+              'kind',
+              SessionsFailureKind.manualRetry,
+            )
+            .having(
+              (failure) => failure.message,
+              'message',
+              contains('Retry'),
+            ),
+      ),
+    );
   });
 
   for (final testCase

@@ -78,6 +78,7 @@ class JoinSessionViewModel extends Notifier<JoinSessionState> {
         errorMessage: message,
         retryable:
             error.kind == SessionsFailureKind.network ||
+            error.kind == SessionsFailureKind.manualRetry ||
             error.kind == SessionsFailureKind.missingDevice ||
             error.kind == SessionsFailureKind.invalidResponse,
       );

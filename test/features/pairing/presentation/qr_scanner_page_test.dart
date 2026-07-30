@@ -50,6 +50,66 @@ void main() {
     expect(manualFallbacks, 1);
   });
 
+  testWidgets('stops for inactive paused detached and resumes safely', (
+    tester,
+  ) async {
+    final controller = _FakeScannerController();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: QrScannerPage(scannerController: controller, onAccepted: (_) {}),
+      ),
+    );
+    expect(controller.startCalls, 1);
+
+    for (final lifecycleState in [
+      AppLifecycleState.inactive,
+      AppLifecycleState.paused,
+      AppLifecycleState.detached,
+    ]) {
+      await tester.binding.handleAppLifecycleStateChanged(lifecycleState);
+      await tester.pump();
+      await tester.binding.handleAppLifecycleStateChanged(
+        AppLifecycleState.resumed,
+      );
+      await tester.pump();
+    }
+
+    expect(controller.stopCalls, 3);
+    expect(controller.startCalls, 4);
+  });
+
+  testWidgets('never restarts after submission or dispose', (tester) async {
+    final controller = _FakeScannerController(raw: validPayload);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: QrScannerPage(scannerController: controller, onAccepted: (_) {}),
+      ),
+    );
+    await tester.tap(find.byKey(const Key('scanner-detect')));
+    await tester.pump();
+    expect(controller.startCalls, 1);
+
+    await tester.binding.handleAppLifecycleStateChanged(
+      AppLifecycleState.paused,
+    );
+    await tester.binding.handleAppLifecycleStateChanged(
+      AppLifecycleState.resumed,
+    );
+    await tester.pump();
+    expect(controller.startCalls, 1);
+
+    await tester.pumpWidget(const MaterialApp(home: SizedBox()));
+    await tester.pump();
+    final startsAfterDispose = controller.startCalls;
+    await tester.binding.handleAppLifecycleStateChanged(
+      AppLifecycleState.resumed,
+    );
+    await tester.pump();
+
+    expect(controller.startCalls, startsAfterDispose);
+    expect(controller.disposeCalls, 1);
+  });
+
   testWidgets('disposes the scanner controller with the page', (tester) async {
     final controller = _FakeScannerController();
     await tester.pumpWidget(
