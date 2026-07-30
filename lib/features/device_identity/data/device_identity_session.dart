@@ -43,6 +43,7 @@ class DeviceIdentitySession {
   DeviceAccessToken? _cachedToken;
   Future<String>? _inFlight;
   bool _invalidated = false;
+  int _generation = 0;
 
   Future<String> accessToken({bool forceRefresh = false}) {
     if (_invalidated) {
@@ -61,8 +62,9 @@ class DeviceIdentitySession {
     final existing = _inFlight;
     if (existing != null) return existing;
 
+    final generation = _generation;
     late final Future<String> shared;
-    shared = _exchange().whenComplete(() {
+    shared = _exchange(generation).whenComplete(() {
       if (identical(_inFlight, shared)) _inFlight = null;
     });
     _inFlight = shared;
@@ -70,14 +72,26 @@ class DeviceIdentitySession {
   }
 
   Future<void> reset() async {
+    final generation = ++_generation;
     _invalidated = true;
     _cachedToken = null;
+    _inFlight = null;
     await _storage.clear();
-    _invalidated = false;
+    if (generation == _generation) _invalidated = false;
   }
 
-  Future<String> _exchange() async {
+  Future<String> _exchange(int generation) async {
+    try {
+      return await _exchangeCurrent(generation);
+    } catch (_) {
+      _ensureCurrent(generation);
+      rethrow;
+    }
+  }
+
+  Future<String> _exchangeCurrent(int generation) async {
     var credential = await _storage.read();
+    _ensureCurrent(generation);
     if (credential == null) {
       final bootstrap = await _api.bootstrap(
         BootstrapDeviceRequest(
@@ -86,6 +100,7 @@ class DeviceIdentitySession {
           platform: _platform,
         ),
       );
+      _ensureCurrent(generation);
       credential = DeviceCredential(
         deviceId: bootstrap.deviceId,
         credentialSecret: bootstrap.credentialSecret,
@@ -94,6 +109,7 @@ class DeviceIdentitySession {
         platform: _platform,
       );
       await _storage.write(credential);
+      _ensureCurrent(generation);
     }
 
     try {
@@ -103,9 +119,11 @@ class DeviceIdentitySession {
           credentialSecret: credential.credentialSecret,
         ),
       );
+      _ensureCurrent(generation);
       _cachedToken = response.toDomain();
       return response.accessToken;
     } on DioException catch (error) {
+      _ensureCurrent(generation);
       if (error.response?.statusCode == 401) {
         _invalidated = true;
         _cachedToken = null;
@@ -114,10 +132,17 @@ class DeviceIdentitySession {
         } catch (_) {
           // Keep the session invalidated. An explicit reset retries cleanup.
         }
+        _ensureCurrent(generation);
         _onInvalidated?.call();
         throw const DeviceIdentitySessionInvalidatedException();
       }
       rethrow;
+    }
+  }
+
+  void _ensureCurrent(int generation) {
+    if (generation != _generation) {
+      throw const DeviceIdentitySessionInvalidatedException();
     }
   }
 }

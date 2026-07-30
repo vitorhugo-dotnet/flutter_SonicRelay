@@ -127,6 +127,81 @@ void main() {
     expect(api.tokenCalls, 1);
   });
 
+  test('reset supersedes a pending exchange and the new token wins', () async {
+    await storage.write(_credential);
+    final pendingA = Completer<DeviceTokenResponse>();
+    api.pendingToken = pendingA.future;
+    final session = createSession();
+    final tokenA = session.accessToken();
+    await Future<void>.delayed(Duration.zero);
+    expect(api.tokenCalls, 1);
+
+    await session.reset();
+    final pendingB = Completer<DeviceTokenResponse>();
+    api.pendingToken = pendingB.future;
+    final tokenB = session.accessToken();
+    await Future<void>.delayed(Duration.zero);
+    await Future<void>.delayed(Duration.zero);
+
+    final tokenAExpectation = expectLater(
+      tokenA,
+      throwsA(isA<DeviceIdentitySessionInvalidatedException>()),
+    );
+    pendingA.complete(_token('token-a', now.add(const Duration(hours: 1))));
+    await tokenAExpectation;
+
+    expect(api.bootstrapCalls, 1);
+    expect(api.tokenCalls, 2);
+    pendingB.complete(_token('token-b', now.add(const Duration(hours: 1))));
+    expect(await tokenB, 'token-b');
+    expect(await session.accessToken(), 'token-b');
+    expect(api.tokenCalls, 2);
+  });
+
+  test(
+    'late 401 from a reset exchange cannot invalidate the new token',
+    () async {
+      var invalidations = 0;
+      await storage.write(_credential);
+      final pendingA = Completer<DeviceTokenResponse>();
+      api.pendingToken = pendingA.future;
+      final session = createSession(onInvalidated: () => invalidations++);
+      final tokenA = session.accessToken();
+      await Future<void>.delayed(Duration.zero);
+
+      await session.reset();
+      final pendingB = Completer<DeviceTokenResponse>();
+      api.pendingToken = pendingB.future;
+      final tokenB = session.accessToken();
+      await Future<void>.delayed(Duration.zero);
+      await Future<void>.delayed(Duration.zero);
+
+      final tokenAExpectation = expectLater(
+        tokenA,
+        throwsA(isA<DeviceIdentitySessionInvalidatedException>()),
+      );
+      pendingA.completeError(
+        DioException(
+          requestOptions: RequestOptions(path: '/api/devices/token'),
+          response: Response<void>(
+            requestOptions: RequestOptions(path: '/api/devices/token'),
+            statusCode: 401,
+          ),
+          type: DioExceptionType.badResponse,
+        ),
+      );
+      await tokenAExpectation;
+
+      expect(invalidations, 0);
+      expect(api.bootstrapCalls, 1);
+      expect(api.tokenCalls, 2);
+      pendingB.complete(_token('token-b', now.add(const Duration(hours: 1))));
+      expect(await tokenB, 'token-b');
+      expect(await session.accessToken(), 'token-b');
+      expect((await storage.read())?.deviceId, 'device-1');
+    },
+  );
+
   test('force refresh exchanges a still valid cached token', () async {
     await storage.write(_credential);
     api.tokenResponses.addAll([
