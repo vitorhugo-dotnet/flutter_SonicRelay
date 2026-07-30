@@ -146,9 +146,11 @@ void main() {
   );
 
   test(
-    'token revocation invalidates readiness and redirects an active listener',
+    'token revocation redirects an active listener when cleanup fails',
     () async {
-      final storage = _MemoryCredentialStorage()..credential = _credential;
+      final storage = _MemoryCredentialStorage()
+        ..credential = _credential
+        ..clearFailuresRemaining = 1;
       final api = _RevocableDeviceIdentityApi();
       final repository = _FakePairingRepository()
         ..pairings = [
@@ -190,6 +192,11 @@ void main() {
       expect(readiness.status, DeviceReadinessStatus.deviceSetup);
       expect(readiness.requiresReset, isTrue);
       expect(deviceIdentityRedirect(readiness, '/listener'), '/device-setup');
+
+      await expectLater(
+        container.read(deviceIdentitySessionProvider).accessToken(),
+        throwsA(isA<DeviceIdentitySessionInvalidatedException>()),
+      );
     },
   );
 }
@@ -197,9 +204,16 @@ void main() {
 class _MemoryCredentialStorage implements DeviceCredentialStorage {
   DeviceCredential? credential;
   Object? readError;
+  int clearFailuresRemaining = 0;
 
   @override
-  Future<void> clear() async => credential = null;
+  Future<void> clear() async {
+    if (clearFailuresRemaining > 0) {
+      clearFailuresRemaining--;
+      throw const DeviceCredentialStorageException('clear failed');
+    }
+    credential = null;
+  }
 
   @override
   Future<DeviceCredential?> read() async {

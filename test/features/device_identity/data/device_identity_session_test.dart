@@ -25,15 +25,17 @@ void main() {
     now = DateTime.utc(2026, 7, 29, 12);
   });
 
-  DeviceIdentitySession createSession({void Function()? onInvalidated}) =>
-      DeviceIdentitySession(
-        api: api,
-        storage: storage,
-        deviceName: 'Pixel 9',
-        platform: 'android',
-        now: () => now,
-        onInvalidated: onInvalidated,
-      );
+  DeviceIdentitySession createSession({
+    void Function()? onInvalidated,
+    DeviceCredentialStorage? credentialStorage,
+  }) => DeviceIdentitySession(
+    api: api,
+    storage: credentialStorage ?? storage,
+    deviceName: 'Pixel 9',
+    platform: 'android',
+    now: () => now,
+    onInvalidated: onInvalidated,
+  );
 
   test('bootstraps an absent credential before exchanging a token', () async {
     api.tokenResponses.add(
@@ -229,6 +231,71 @@ void main() {
   });
 
   test(
+    'failed revocation cleanup stays invalidated until reset clears storage',
+    () async {
+      var invalidations = 0;
+      final failingStorage = _FailingClearCredentialStorage(
+        credential: _credential,
+        clearFailuresRemaining: 2,
+      );
+      api.tokenErrors.add(
+        DioException(
+          requestOptions: RequestOptions(path: '/api/devices/token'),
+          response: Response<void>(
+            requestOptions: RequestOptions(path: '/api/devices/token'),
+            statusCode: 401,
+          ),
+          type: DioExceptionType.badResponse,
+        ),
+      );
+      final session = createSession(
+        credentialStorage: failingStorage,
+        onInvalidated: () => invalidations++,
+      );
+
+      await expectLater(
+        session.accessToken(),
+        throwsA(
+          isA<DeviceIdentitySessionInvalidatedException>().having(
+            (error) => error.toString(),
+            'non-sensitive message',
+            isNot(contains('secure storage unavailable')),
+          ),
+        ),
+      );
+      expect(invalidations, 1);
+      expect(failingStorage.clearCalls, 1);
+
+      await expectLater(
+        session.accessToken(),
+        throwsA(isA<DeviceIdentitySessionInvalidatedException>()),
+      );
+      expect(api.bootstrapCalls, 0);
+      expect(api.tokenCalls, 1);
+      expect(invalidations, 1);
+
+      await expectLater(
+        session.reset(),
+        throwsA(isA<DeviceCredentialStorageException>()),
+      );
+      expect(failingStorage.clearCalls, 2);
+      await expectLater(
+        session.accessToken(),
+        throwsA(isA<DeviceIdentitySessionInvalidatedException>()),
+      );
+      expect(api.bootstrapCalls, 0);
+
+      await session.reset();
+      expect(failingStorage.clearCalls, 3);
+      api.tokenResponses.add(
+        _token('token-after-reset', now.add(const Duration(hours: 1))),
+      );
+      expect(await session.accessToken(), 'token-after-reset');
+      expect(api.bootstrapCalls, 1);
+    },
+  );
+
+  test(
     'network failure retains the credential and never rebootstraps',
     () async {
       await storage.write(_credential);
@@ -293,4 +360,33 @@ class _FakeDeviceIdentityApi implements DeviceIdentityApi {
     if (tokenErrors.isNotEmpty) throw tokenErrors.removeAt(0);
     return tokenResponses.removeAt(0);
   }
+}
+
+class _FailingClearCredentialStorage implements DeviceCredentialStorage {
+  _FailingClearCredentialStorage({
+    required this.credential,
+    required this.clearFailuresRemaining,
+  });
+
+  DeviceCredential? credential;
+  int clearFailuresRemaining;
+  int clearCalls = 0;
+
+  @override
+  Future<void> clear() async {
+    clearCalls++;
+    if (clearFailuresRemaining > 0) {
+      clearFailuresRemaining--;
+      throw const DeviceCredentialStorageException(
+        'secure storage unavailable',
+      );
+    }
+    credential = null;
+  }
+
+  @override
+  Future<DeviceCredential?> read() async => credential;
+
+  @override
+  Future<void> write(DeviceCredential value) async => credential = value;
 }

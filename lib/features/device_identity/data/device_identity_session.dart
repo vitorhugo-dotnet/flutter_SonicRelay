@@ -70,9 +70,10 @@ class DeviceIdentitySession {
   }
 
   Future<void> reset() async {
-    _invalidated = false;
+    _invalidated = true;
     _cachedToken = null;
     await _storage.clear();
+    _invalidated = false;
   }
 
   Future<String> _exchange() async {
@@ -108,7 +109,11 @@ class DeviceIdentitySession {
       if (error.response?.statusCode == 401) {
         _invalidated = true;
         _cachedToken = null;
-        await _storage.clear();
+        try {
+          await _storage.clear();
+        } catch (_) {
+          // Keep the session invalidated. An explicit reset retries cleanup.
+        }
         _onInvalidated?.call();
         throw const DeviceIdentitySessionInvalidatedException();
       }

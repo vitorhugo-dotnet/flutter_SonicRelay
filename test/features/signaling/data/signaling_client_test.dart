@@ -1,9 +1,17 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sonic_relay/core/websocket/websocket_client.dart';
+import 'package:sonic_relay/features/device_identity/data/device_credential_storage.dart';
+import 'package:sonic_relay/features/device_identity/data/device_identity_api.dart';
 import 'package:sonic_relay/features/device_identity/data/device_identity_session.dart';
+import 'package:sonic_relay/features/device_identity/data/dto/bootstrap_device_request.dart';
+import 'package:sonic_relay/features/device_identity/data/dto/bootstrap_device_response.dart';
+import 'package:sonic_relay/features/device_identity/data/dto/device_token_request.dart';
+import 'package:sonic_relay/features/device_identity/data/dto/device_token_response.dart';
+import 'package:sonic_relay/features/device_identity/domain/device_credential.dart';
 import 'package:sonic_relay/features/sessions/domain/stream_session.dart';
 import 'package:sonic_relay/features/signaling/data/signaling_client.dart';
 import 'package:sonic_relay/features/signaling/domain/signaling_message_type.dart';
@@ -247,6 +255,61 @@ void main() {
     },
   );
 
+  test(
+    'revocation cleanup failure still publishes once and stops reconnecting',
+    () async {
+      final timers = <ManualTimer>[];
+      final localApi = _RevocableDeviceIdentityApi();
+      final localStorage = _FailingClearCredentialStorage();
+      var invalidations = 0;
+      final localIdentity = DeviceIdentitySession(
+        api: localApi,
+        storage: localStorage,
+        deviceName: 'Pixel 9',
+        platform: 'android',
+        onInvalidated: () => invalidations++,
+      );
+      late FakeWebSocketConnection localConnection;
+      var connectorCalls = 0;
+      final webSocketClient = WebSocketClient(
+        connector: (uri, headers) async {
+          connectorCalls++;
+          localConnection = FakeWebSocketConnection();
+          return localConnection;
+        },
+        scheduleTimer: (delay, callback) {
+          final timer = ManualTimer(delay, callback);
+          timers.add(timer);
+          return timer;
+        },
+      );
+      final localClient = SignalingClient(
+        webSocketClient: webSocketClient,
+        deviceIdentitySession: localIdentity,
+      );
+      addTearDown(localClient.dispose);
+
+      await localClient.connect(session: session);
+      localApi.revoked = true;
+      await localConnection.close();
+      await Future<void>.delayed(Duration.zero);
+      expect(timers, hasLength(1));
+
+      timers.single.fire();
+      await Future<void>.delayed(Duration.zero);
+      await Future<void>.delayed(Duration.zero);
+
+      expect(invalidations, 1);
+      expect(localStorage.clearCalls, 1);
+      expect(connectorCalls, 1);
+      expect(timers, hasLength(1));
+      await expectLater(
+        localIdentity.accessToken(),
+        throwsA(isA<DeviceIdentitySessionInvalidatedException>()),
+      );
+    },
+  );
+
   test('a newer session supersedes an in-flight token operation', () async {
     final localIdentity = SupersededDeviceIdentitySession();
     final uris = <Uri>[];
@@ -376,4 +439,54 @@ void main() {
     expect(message.type, SignalingMessageType.unknown);
     expect(message.rawType, 'future.message');
   });
+}
+
+class _RevocableDeviceIdentityApi implements DeviceIdentityApi {
+  bool revoked = false;
+
+  @override
+  Future<BootstrapDeviceResponse> bootstrap(BootstrapDeviceRequest request) =>
+      throw StateError('bootstrap must not run');
+
+  @override
+  Future<DeviceTokenResponse> token(DeviceTokenRequest request) async {
+    if (revoked) {
+      throw DioException(
+        requestOptions: RequestOptions(path: '/api/devices/token'),
+        response: Response<void>(
+          requestOptions: RequestOptions(path: '/api/devices/token'),
+          statusCode: 401,
+        ),
+        type: DioExceptionType.badResponse,
+      );
+    }
+    return DeviceTokenResponse(
+      accessToken: 'device-token',
+      expiresAt: DateTime.now().toUtc().add(const Duration(hours: 1)),
+      scopes: const ['stream:listen'],
+    );
+  }
+}
+
+class _FailingClearCredentialStorage implements DeviceCredentialStorage {
+  DeviceCredential? credential = const DeviceCredential(
+    deviceId: 'viewer-1',
+    credentialSecret: 'secret-1',
+    credentialVersion: 1,
+    deviceType: 'flutter_viewer',
+    platform: 'android',
+  );
+  int clearCalls = 0;
+
+  @override
+  Future<void> clear() async {
+    clearCalls++;
+    throw const DeviceCredentialStorageException('clear failed');
+  }
+
+  @override
+  Future<DeviceCredential?> read() async => credential;
+
+  @override
+  Future<void> write(DeviceCredential value) async => credential = value;
 }
