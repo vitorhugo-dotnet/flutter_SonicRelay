@@ -327,6 +327,9 @@ void main() {
           timers.add(timer);
           return timer;
         },
+        // Jitter is exercised by its own dedicated test below; disable it
+        // here so the exact backoff durations asserted below are stable.
+        reconnectPolicy: const ReconnectPolicy(jitterRatio: 0),
       );
       addTearDown(client.dispose);
 
@@ -365,6 +368,9 @@ void main() {
           timers.add(timer);
           return timer;
         },
+        // Jitter is exercised by its own dedicated test below; disable it
+        // here so the exact backoff durations asserted below are stable.
+        reconnectPolicy: const ReconnectPolicy(jitterRatio: 0),
       );
       addTearDown(client.dispose);
 
