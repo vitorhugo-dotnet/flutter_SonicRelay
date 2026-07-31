@@ -66,9 +66,9 @@ void main() {
       AppLifecycleState.paused,
       AppLifecycleState.detached,
     ]) {
-      await tester.binding.handleAppLifecycleStateChanged(lifecycleState);
+      tester.binding.handleAppLifecycleStateChanged(lifecycleState);
       await tester.pump();
-      await tester.binding.handleAppLifecycleStateChanged(
+      tester.binding.handleAppLifecycleStateChanged(
         AppLifecycleState.resumed,
       );
       await tester.pump();
@@ -89,10 +89,10 @@ void main() {
     await tester.pump();
     expect(controller.startCalls, 1);
 
-    await tester.binding.handleAppLifecycleStateChanged(
+    tester.binding.handleAppLifecycleStateChanged(
       AppLifecycleState.paused,
     );
-    await tester.binding.handleAppLifecycleStateChanged(
+    tester.binding.handleAppLifecycleStateChanged(
       AppLifecycleState.resumed,
     );
     await tester.pump();
@@ -101,7 +101,7 @@ void main() {
     await tester.pumpWidget(const MaterialApp(home: SizedBox()));
     await tester.pump();
     final startsAfterDispose = controller.startCalls;
-    await tester.binding.handleAppLifecycleStateChanged(
+    tester.binding.handleAppLifecycleStateChanged(
       AppLifecycleState.resumed,
     );
     await tester.pump();
