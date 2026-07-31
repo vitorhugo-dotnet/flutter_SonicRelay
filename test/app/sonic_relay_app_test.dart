@@ -12,21 +12,15 @@ import 'package:sonic_relay/features/settings/presentation/settings_page.dart';
 String _testDiagnosticsDirectory() =>
     Directory.systemTemp.createTempSync('sonicrelay_app_test_').path;
 
-ProviderScope testApp({void Function()? onAuthRepositoryConstructed}) =>
-    ProviderScope(
-      overrides: [
-        deviceReadinessProvider.overrideWith(_ReadyReadinessNotifier.new),
-        diagnosticsDirectoryProvider.overrideWithValue(
-          _testDiagnosticsDirectory(),
-        ),
-        if (onAuthRepositoryConstructed != null)
-          authRepositoryProvider.overrideWith((ref) {
-            onAuthRepositoryConstructed();
-            throw StateError('Account auth must not be active at startup.');
-          }),
-      ],
-      child: const SonicRelayApp(),
-    );
+ProviderScope testApp() => ProviderScope(
+  overrides: [
+    deviceReadinessProvider.overrideWith(_ReadyReadinessNotifier.new),
+    diagnosticsDirectoryProvider.overrideWithValue(
+      _testDiagnosticsDirectory(),
+    ),
+  ],
+  child: const SonicRelayApp(),
+);
 
 void main() {
   testWidgets('uses a dark Material 3 theme', (tester) async {
@@ -38,21 +32,15 @@ void main() {
     expect(materialApp.theme?.brightness, Brightness.dark);
   });
 
-  testWidgets('startup opens device-first join without constructing auth', (
+  testWidgets('startup opens device-first join without any account UI', (
     tester,
   ) async {
-    var authRepositoryConstructed = false;
-    await tester.pumpWidget(
-      testApp(
-        onAuthRepositoryConstructed: () => authRepositoryConstructed = true,
-      ),
-    );
+    await tester.pumpWidget(testApp());
     await tester.pumpAndSettle();
 
     expect(find.text('Join stream'), findsOneWidget);
     expect(find.text('Email'), findsNothing);
     expect(find.text('Password'), findsNothing);
-    expect(authRepositoryConstructed, isFalse);
   });
 
   testWidgets('feature pages show device-first presentation content', (

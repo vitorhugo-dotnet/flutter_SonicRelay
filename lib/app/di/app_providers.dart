@@ -9,7 +9,6 @@ import '../../core/http/auth_interceptor.dart';
 import '../../core/http/dio_client.dart';
 import '../../core/storage/background_playback_storage.dart';
 import '../../core/storage/relay_mode_storage.dart';
-import '../../core/storage/secure_token_storage.dart';
 import '../../core/storage/server_config_storage.dart';
 import '../../features/background/data/foreground_stream_service.dart';
 import '../../features/background/presentation/stream_lifecycle_controller.dart';
@@ -19,14 +18,9 @@ import '../../core/webrtc/ice_servers_repository.dart';
 import '../../core/webrtc/rtc_ice_server_config.dart';
 import '../../core/webrtc/rtc_peer_connection_factory.dart';
 import '../../core/websocket/websocket_client.dart';
-import '../../features/auth/data/auth_api.dart';
-import '../../features/auth/data/auth_repository.dart';
 import '../../features/device_identity/data/device_credential_storage.dart';
 import '../../features/device_identity/data/device_identity_api.dart';
 import '../../features/device_identity/data/device_identity_session.dart';
-import '../../features/devices/data/device_id_storage.dart';
-import '../../features/devices/data/devices_api.dart';
-import '../../features/devices/data/devices_repository.dart';
 import '../../features/pairing/data/pairing_api.dart';
 import '../../features/pairing/data/pairing_repository.dart';
 import '../../features/pairing/domain/device_pairing.dart';
@@ -111,10 +105,6 @@ class ForceRelayNotifier extends Notifier<bool> {
     state = value;
   }
 }
-
-final tokenStorageProvider = Provider<TokenStorage>(
-  (ref) => SecureTokenStorage(ref.watch(secureStorageProvider)),
-);
 
 final devicePlatformProvider = Provider<String>(
   (ref) => Platform.operatingSystem,
@@ -330,32 +320,6 @@ final dioProvider = Provider<Dio>((ref) {
 
 final pairingRepositoryProvider = Provider<PairingRepository>(
   (ref) => PairingRepository(api: DioPairingApi(ref.watch(dioProvider))),
-);
-
-final authApiProvider = Provider<AuthApi>(
-  (ref) => DioAuthApi(ref.watch(dioProvider)),
-);
-
-final authRepositoryProvider = Provider<AuthRepository>(
-  (ref) => AuthRepository(
-    api: ref.watch(authApiProvider),
-    tokenStorage: ref.watch(tokenStorageProvider),
-  ),
-);
-
-final deviceIdStorageProvider = Provider<DeviceIdStorage>(
-  (ref) => SecureDeviceIdStorage(ref.watch(secureStorageProvider)),
-);
-
-final devicesApiProvider = Provider<DevicesApi>(
-  (ref) => DioDevicesApi(ref.watch(dioProvider)),
-);
-
-final devicesRepositoryProvider = Provider<DevicesRepository>(
-  (ref) => DevicesRepository(
-    api: ref.watch(devicesApiProvider),
-    deviceIdStorage: ref.watch(deviceIdStorageProvider),
-  ),
 );
 
 final sessionsApiProvider = Provider<SessionsApi>(
