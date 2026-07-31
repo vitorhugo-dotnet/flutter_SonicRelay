@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
 
-import '../diagnostics/sonic_log.dart';
+import '../diagnostics/diagnostic_log.dart';
 import 'websocket_message.dart';
 
 enum WebSocketConnectionState {
@@ -11,6 +11,8 @@ enum WebSocketConnectionState {
   reconnecting,
   disconnected,
 }
+
+enum WebSocketDisconnectReason { normal, serverClosed, transportError, connectFailed }
 
 /// A single open transport connection, abstracted so [WebSocketClient] can
 /// be tested without opening a real socket.
@@ -25,9 +27,17 @@ abstract interface class WebSocketConnection {
 typedef WebSocketConnector =
     Future<WebSocketConnection> Function(Uri uri, Map<String, String> headers);
 
+/// Produces connection headers (e.g. a bearer token) fresh for each connect
+/// attempt, so a token that expires mid-outage is picked up on the next
+/// retry instead of retrying forever with a stale, now-rejected header.
+/// [isReconnect] is true for every attempt after the first, so a provider
+/// can force a token refresh only when retrying.
 typedef WebSocketHeadersProvider =
     Future<Map<String, String>> Function(bool isReconnect);
 
+/// Decides whether a connect failure should be retried. Returning false
+/// stops all further reconnect attempts (e.g. when the device identity has
+/// been revoked and retrying would never succeed).
 typedef WebSocketReconnectPredicate = bool Function(Object error);
 
 /// Default [WebSocketConnector] backed by `dart:io`'s [WebSocket].
@@ -60,11 +70,17 @@ class ReconnectPolicy {
     this.initialDelay = const Duration(seconds: 1),
     this.maxDelay = const Duration(seconds: 30),
     this.multiplier = 2.0,
+    this.jitterRatio = 0.2,
   });
 
   final Duration initialDelay;
   final Duration maxDelay;
   final double multiplier;
+
+  /// Fraction of the computed delay randomized in both directions (e.g. 0.2
+  /// means +/-20%), so clients dropped by the same outage don't all retry the
+  /// API in lockstep. Zero disables jitter.
+  final double jitterRatio;
 
   Duration delayForAttempt(int attempt) {
     final scaledMillis =
@@ -75,6 +91,20 @@ class ReconnectPolicy {
     );
     return Duration(milliseconds: cappedMillis.round());
   }
+
+  /// [delayForAttempt] jittered by +/-[jitterRatio], using [jitterSample] — a
+  /// value in [-1, 1] — as the random draw. Clamped to [0, maxDelay].
+  Duration jitteredDelayForAttempt(int attempt, double jitterSample) {
+    final base = delayForAttempt(attempt);
+    final ratio = jitterRatio.clamp(0.0, 1.0);
+    if (ratio <= 0) return base;
+    final fraction = ratio * jitterSample.clamp(-1.0, 1.0);
+    final jitteredMillis = (base.inMilliseconds * (1 + fraction)).clamp(
+      0.0,
+      maxDelay.inMilliseconds.toDouble(),
+    );
+    return Duration(milliseconds: jitteredMillis.round());
+  }
 }
 
 /// Reconnecting JSON-over-WebSocket transport.
@@ -84,24 +114,36 @@ class ReconnectPolicy {
 class WebSocketClient {
   WebSocketClient({
     required WebSocketConnector connector,
+    required DiagnosticLog diagnosticLog,
     ReconnectPolicy reconnectPolicy = const ReconnectPolicy(),
     Timer Function(Duration delay, void Function() callback)? scheduleTimer,
+    math.Random? random,
   }) : _connector = connector,
+       _diagnosticLog = diagnosticLog,
        _reconnectPolicy = reconnectPolicy,
-       _scheduleTimer = scheduleTimer ?? Timer.new;
+       _scheduleTimer = scheduleTimer ?? Timer.new,
+       _random = random ?? math.Random();
 
   final WebSocketConnector _connector;
+  final DiagnosticLog _diagnosticLog;
   final ReconnectPolicy _reconnectPolicy;
-  final Timer Function(Duration delay, void Function() callback) _scheduleTimer;
+  final Timer Function(Duration delay, void Function() callback)
+  _scheduleTimer;
+  final math.Random _random;
 
   final _stateController =
       StreamController<WebSocketConnectionState>.broadcast();
   final _messageController = StreamController<WebSocketMessage>.broadcast();
+  final _disconnectReasonController =
+      StreamController<WebSocketDisconnectReason>.broadcast();
 
   Stream<WebSocketConnectionState> get connectionState =>
       _stateController.stream;
 
   Stream<WebSocketMessage> get messages => _messageController.stream;
+
+  Stream<WebSocketDisconnectReason> get disconnectReasons =>
+      _disconnectReasonController.stream;
 
   WebSocketConnection? _connection;
   StreamSubscription<dynamic>? _subscription;
@@ -154,7 +196,12 @@ class WebSocketClient {
     try {
       final uri = _uri!;
       final isReconnect = _attempt > 0;
-      sonicLog('WebSocket', 'connecting to $uri (attempt $_attempt)');
+      unawaited(
+        _diagnosticLog.write(
+          'WebSocket',
+          'connecting to $uri (attempt $_attempt)',
+        ),
+      );
       final headersProvider = _headersProvider;
       final headers = headersProvider == null
           ? _headers
@@ -167,7 +214,7 @@ class WebSocketClient {
       }
       _connection = connection;
       _attempt = 0;
-      sonicLog('WebSocket', 'connected to $uri');
+      unawaited(_diagnosticLog.write('WebSocket', 'connected to $uri'));
       _stateController.add(WebSocketConnectionState.connected);
       _subscription = connection.stream.listen(
         (dynamic data) {
@@ -176,18 +223,27 @@ class WebSocketClient {
           }
         },
         onDone: () {
-          sonicLog('WebSocket', 'socket closed by peer');
+          unawaited(
+            _diagnosticLog.write('WebSocket', 'socket closed by peer'),
+          );
+          _disconnectReasonController.add(
+            WebSocketDisconnectReason.serverClosed,
+          );
           _handleDisconnect(generation, connection);
         },
         onError: (Object error) {
-          sonicLog('WebSocket', 'socket error: $error');
+          unawaited(_diagnosticLog.write('WebSocket', 'socket error'));
+          _disconnectReasonController.add(
+            WebSocketDisconnectReason.transportError,
+          );
           _handleDisconnect(generation, connection);
         },
         cancelOnError: true,
       );
     } catch (error) {
       if (!_isCurrent(generation)) return;
-      sonicLog('WebSocket', 'connect failed: $error');
+      unawaited(_diagnosticLog.write('WebSocket', 'connect failed'));
+      _disconnectReasonController.add(WebSocketDisconnectReason.connectFailed);
       if (!_shouldReconnectOnError(error)) {
         _stopped = true;
         _stateController.add(WebSocketConnectionState.disconnected);
@@ -207,7 +263,11 @@ class WebSocketClient {
 
   void _scheduleReconnect(int generation) {
     if (!_isCurrent(generation)) return;
-    final delay = _reconnectPolicy.delayForAttempt(_attempt);
+    final jitterSample = _random.nextDouble() * 2 - 1;
+    final delay = _reconnectPolicy.jitteredDelayForAttempt(
+      _attempt,
+      jitterSample,
+    );
     _attempt++;
     _stateController.add(WebSocketConnectionState.reconnecting);
     _reconnectTimer = _scheduleTimer(delay, () {
@@ -238,6 +298,7 @@ class WebSocketClient {
     if (supersededAfterCancel || generation != _generation || !_stopped) {
       return;
     }
+    _disconnectReasonController.add(WebSocketDisconnectReason.normal);
     _stateController.add(WebSocketConnectionState.disconnected);
   }
 
@@ -245,5 +306,6 @@ class WebSocketClient {
     await disconnect();
     await _stateController.close();
     await _messageController.close();
+    await _disconnectReasonController.close();
   }
 }

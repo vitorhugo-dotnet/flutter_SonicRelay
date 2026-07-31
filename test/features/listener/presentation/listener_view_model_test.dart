@@ -1,9 +1,11 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sonic_relay/app/di/app_providers.dart';
+import 'package:sonic_relay/core/diagnostics/diagnostic_log.dart';
 import 'package:sonic_relay/core/webrtc/rtc_ice_server_config.dart';
 import 'package:sonic_relay/core/webrtc/rtc_peer_connection_factory.dart';
 import 'package:sonic_relay/core/websocket/websocket_client.dart';
@@ -13,6 +15,9 @@ import 'package:sonic_relay/features/listener/data/webrtc_receiver_service.dart'
 import 'package:sonic_relay/features/listener/presentation/listener_view_model.dart';
 import 'package:sonic_relay/features/sessions/domain/stream_session.dart';
 import 'package:sonic_relay/features/signaling/data/signaling_client.dart';
+
+DiagnosticLog _testLog() =>
+    DiagnosticLog(Directory.systemTemp.createTempSync('sonicrelay_test_').path);
 
 class FakeAudioReceiverService implements AudioReceiverService {
   int stopCount = 0;
@@ -124,6 +129,7 @@ void main() {
       final audio = FakeAudioReceiverService();
       late FakeWebSocketConnection connection;
       final webSocketClient = WebSocketClient(
+        diagnosticLog: _testLog(),
         connector: (uri, headers) async {
           connection = FakeWebSocketConnection();
           return connection;
@@ -174,6 +180,7 @@ void main() {
       var connectorCalls = 0;
       FakeWebSocketConnection? lateConnection;
       final webSocketClient = WebSocketClient(
+        diagnosticLog: _testLog(),
         connector: (uri, headers) async {
           connectorCalls++;
           lateConnection = FakeWebSocketConnection();
@@ -248,6 +255,7 @@ void main() {
     final connectorResult = Completer<WebSocketConnection>();
     final lateConnection = FakeWebSocketConnection();
     final webSocketClient = WebSocketClient(
+      diagnosticLog: _testLog(),
       connector: (uri, headers) {
         connectorStarted.complete();
         return connectorResult.future;
@@ -322,6 +330,7 @@ void main() {
       );
       final connection = SlowFailingCloseWebSocketConnection();
       final webSocketClient = WebSocketClient(
+        diagnosticLog: _testLog(),
         connector: (uri, headers) async => connection,
         scheduleTimer: (delay, callback) => Timer(Duration.zero, callback),
       );

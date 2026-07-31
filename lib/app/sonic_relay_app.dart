@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -28,8 +30,13 @@ class _SonicRelayAppState extends ConsumerState<SonicRelayApp>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    // Feed foreground/background transitions into the lifecycle controller so it
-    // can start/stop the Android foreground service during an active stream.
+    // inactive/hidden/paused/detached must only ever update UI/service
+    // visibility (via the lifecycle controller below), never be treated as an
+    // explicit leave — only a user-initiated Stop/Leave, logout, or terminal
+    // connection state closes the active stream.
+    unawaited(
+      ref.read(diagnosticLogProvider).write('Lifecycle', 'app lifecycle -> $state'),
+    );
     final inForeground = state == AppLifecycleState.resumed;
     ref
         .read(streamLifecycleControllerProvider)

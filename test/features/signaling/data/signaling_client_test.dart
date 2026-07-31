@@ -1,8 +1,10 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:sonic_relay/core/diagnostics/diagnostic_log.dart';
 import 'package:sonic_relay/core/websocket/websocket_client.dart';
 import 'package:sonic_relay/features/device_identity/data/device_credential_storage.dart';
 import 'package:sonic_relay/features/device_identity/data/device_identity_api.dart';
@@ -15,6 +17,9 @@ import 'package:sonic_relay/features/device_identity/domain/device_credential.da
 import 'package:sonic_relay/features/sessions/domain/stream_session.dart';
 import 'package:sonic_relay/features/signaling/data/signaling_client.dart';
 import 'package:sonic_relay/features/signaling/domain/signaling_message_type.dart';
+
+DiagnosticLog _testLog() =>
+    DiagnosticLog(Directory.systemTemp.createTempSync('sonicrelay_test_').path);
 
 class FakeWebSocketConnection implements WebSocketConnection {
   final _controller = StreamController<dynamic>.broadcast();
@@ -113,6 +118,7 @@ void main() {
     requestedUris = [];
     requestedHeaders = [];
     final webSocketClient = WebSocketClient(
+      diagnosticLog: _testLog(),
       connector: (uri, headers) async {
         requestedUris.add(uri);
         requestedHeaders.add(headers);
@@ -125,6 +131,7 @@ void main() {
     signalingClient = SignalingClient(
       webSocketClient: webSocketClient,
       deviceIdentitySession: identity,
+      diagnosticLog: _testLog(),
     );
     session = StreamSession(
       sessionId: 'session-1',
@@ -181,6 +188,7 @@ void main() {
       ..errors.add(Exception('token temporarily unavailable'));
     var connectorCalls = 0;
     final webSocketClient = WebSocketClient(
+      diagnosticLog: _testLog(),
       connector: (uri, headers) async {
         connectorCalls++;
         return FakeWebSocketConnection();
@@ -217,6 +225,7 @@ void main() {
       late FakeWebSocketConnection localConnection;
       var connectorCalls = 0;
       final webSocketClient = WebSocketClient(
+        diagnosticLog: _testLog(),
         connector: (uri, headers) async {
           connectorCalls++;
           localConnection = FakeWebSocketConnection();
@@ -272,6 +281,7 @@ void main() {
       late FakeWebSocketConnection localConnection;
       var connectorCalls = 0;
       final webSocketClient = WebSocketClient(
+        diagnosticLog: _testLog(),
         connector: (uri, headers) async {
           connectorCalls++;
           localConnection = FakeWebSocketConnection();
@@ -314,6 +324,7 @@ void main() {
     final localIdentity = SupersededDeviceIdentitySession();
     final uris = <Uri>[];
     final webSocketClient = WebSocketClient(
+      diagnosticLog: _testLog(),
       connector: (uri, headers) async {
         uris.add(uri);
         return FakeWebSocketConnection();
