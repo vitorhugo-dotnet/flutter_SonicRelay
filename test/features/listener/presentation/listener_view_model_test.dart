@@ -139,6 +139,7 @@ void main() {
       final signalingClient = SignalingClient(
         webSocketClient: webSocketClient,
         deviceIdentitySession: FakeDeviceIdentitySession(),
+        diagnosticLog: _testLog(),
       );
 
       final container = ProviderContainer(
@@ -191,6 +192,7 @@ void main() {
       final signalingClient = SignalingClient(
         webSocketClient: webSocketClient,
         deviceIdentitySession: identity,
+        diagnosticLog: _testLog(),
       );
       final container = ProviderContainer(
         overrides: [
@@ -265,6 +267,7 @@ void main() {
     final signalingClient = SignalingClient(
       webSocketClient: webSocketClient,
       deviceIdentitySession: FakeDeviceIdentitySession(),
+      diagnosticLog: _testLog(),
     );
     final container = ProviderContainer(
       overrides: [
@@ -337,6 +340,7 @@ void main() {
       final signalingClient = SignalingClient(
         webSocketClient: webSocketClient,
         deviceIdentitySession: FakeDeviceIdentitySession(),
+        diagnosticLog: _testLog(),
       );
       final container = ProviderContainer(
         overrides: [

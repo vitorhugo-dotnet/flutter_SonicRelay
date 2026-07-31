@@ -202,6 +202,7 @@ void main() {
     final localClient = SignalingClient(
       webSocketClient: webSocketClient,
       deviceIdentitySession: localIdentity,
+      diagnosticLog: _testLog(),
     );
     addTearDown(localClient.dispose);
 
@@ -240,6 +241,7 @@ void main() {
       final localClient = SignalingClient(
         webSocketClient: webSocketClient,
         deviceIdentitySession: localIdentity,
+        diagnosticLog: _testLog(),
       );
       addTearDown(localClient.dispose);
       final subscription = localClient.connectionState.listen(states.add);
@@ -296,6 +298,7 @@ void main() {
       final localClient = SignalingClient(
         webSocketClient: webSocketClient,
         deviceIdentitySession: localIdentity,
+        diagnosticLog: _testLog(),
       );
       addTearDown(localClient.dispose);
 
@@ -334,6 +337,7 @@ void main() {
     final localClient = SignalingClient(
       webSocketClient: webSocketClient,
       deviceIdentitySession: localIdentity,
+      diagnosticLog: _testLog(),
     );
     addTearDown(localClient.dispose);
     final firstSession = StreamSession(
