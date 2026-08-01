@@ -73,7 +73,8 @@ class QrScannerPage extends StatefulWidget {
   State<QrScannerPage> createState() => _QrScannerPageState();
 }
 
-class _QrScannerPageState extends State<QrScannerPage> {
+class _QrScannerPageState extends State<QrScannerPage>
+    with WidgetsBindingObserver {
   late final PairingScannerController _controller;
   bool _accepted = false;
 
@@ -81,9 +82,23 @@ class _QrScannerPageState extends State<QrScannerPage> {
   void initState() {
     super.initState();
     _controller = widget.scannerController ?? MobilePairingScannerController();
+    WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) unawaited(_startScanner());
     });
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Once a QR frame has been accepted the page is on its way out; leave the
+    // scanner alone so a background/foreground cycle during navigation can't
+    // race a stray restart back in.
+    if (_accepted) return;
+    if (state == AppLifecycleState.resumed) {
+      unawaited(_startScanner());
+    } else {
+      unawaited(_controller.stop());
+    }
   }
 
   Future<void> _startScanner() async {
@@ -119,6 +134,7 @@ class _QrScannerPageState extends State<QrScannerPage> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     unawaited(_controller.dispose());
     super.dispose();
   }
