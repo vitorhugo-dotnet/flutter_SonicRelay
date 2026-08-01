@@ -1,71 +1,75 @@
 # Flutter architecture
 
-The viewer follows Feature Driven Development (FDD): reusable technical
-infrastructure in `core`, app wiring in `app`, and user-facing capabilities as
-self-contained `features` with `data` / `domain` / `presentation` boundaries.
+The viewer follows Feature Driven Development (FDD): reusable infrastructure in
+`core`, composition in `app`, and user-facing capabilities in `features`.
 
 ## Layers
 
-```
+```text
 lib/
-  app/        bootstrap, router (go_router), theme, env config, Riverpod providers
-  core/       http (Dio + auth interceptor), storage (secure), websocket, webrtc, widgets
+  app/              bootstrap, device-first router, theme, env, providers
+  core/             Dio, secure storage, WebSocket, WebRTC, widgets
   features/
-    auth/       login, token session, /auth/* contract
-    devices/    device registration and identity (/api/devices)
-    sessions/   join a session by code (/api/sessions/join)
-    signaling/  authenticated WebSocket signaling transport + typed envelope
-    listener/   receive-only WebRTC + audio playback + the listener UI
-    settings/   account/device settings
+    device_identity/ bootstrap, secure credential, token session
+    pairing/         QR/manual pairing, list, revoke
+    sessions/        join with a separate session code
+    signaling/       DeviceBearer WebSocket + typed envelope
+    listener/        receive-only WebRTC, audio, listener UI
+    settings/        server, playback, pairing and identity reset
   main.dart
 ```
 
-- **Riverpod** composes state and dependencies (`lib/app/di/app_providers.dart`).
-- **go_router** guards navigation; all routes except `/login` require an
-  authenticated session.
-- **Dio** carries HTTP with an `AuthInterceptor` that injects the bearer token and
-  performs a single refresh-and-retry on `401`.
-- **flutter_secure_storage** backs both the token store and the device-id store;
-  tokens and ids are never written to SharedPreferences or logs.
-- **flutter_webrtc** provides the receive-only peer connection behind a thin,
-  testable adapter.
+## Device-first composition
 
-## The signaling / WebRTC seam
+- Riverpod owns one shared `DeviceIdentitySession`. The raw identity Dio client
+  calls `/api/devices/bootstrap` and `/api/devices/token`; the authenticated Dio
+  client, pairing repository, sessions repository, and signaling client consume
+  the resulting `DeviceBearer` token.
+- `DeviceReadinessNotifier` exposes `restoring`, `deviceSetup`,
+  `pairingRequired`, and `ready`. Startup finishes credential bootstrap and the
+  active-pairing check before session screens are reachable.
+- go_router exposes `/loading`, `/device-setup`, `/pair`, `/join`,
+  `/session/waiting`, `/listener`, and `/settings`.
+- `AuthInterceptor` renews once after `401`. GET/HEAD and explicitly replay-safe
+  requests may be replayed once; unsafe mutations are not repeated. A later
+  manual action uses the refreshed bearer.
+- A token-exchange `401` clears the secure credential and publishes permanent
+  invalidation. Readiness immediately enters `deviceSetup`, including while the
+  listener is active.
 
-The transport and protocol are deliberately split so each is independently
-testable:
+The stored credential contains a server-issued id and secret and is protected by
+`flutter_secure_storage`. Short-lived access tokens remain in memory. Neither is
+written to SharedPreferences, notifications, intents, or logs.
 
-- `core/websocket/WebSocketClient` — reusable, reconnecting JSON-over-WebSocket
-  transport with exponential backoff. Knows nothing about signaling.
-- `features/signaling/SignalingClient` — builds the authenticated URL, maps frames
-  through `SignalingMessageMapper` into typed `SignalingMessage`s, replies to
-  `ping` with `pong`, forwards outbound messages (each addressed via `to`), and
-  stops reconnecting on `session.ended`/leave.
-- `features/listener/data/WebRtcReceiverService` — the receive-only peer-connection
-  state machine. It is **signaling-agnostic**: inbound protocol messages arrive via
-  `handleSignal`, and the answers/candidates it produces (plus the `viewer.ready`
-  reply to `publisher.ready`) are emitted on `outboundSignals`.
-- `features/listener/presentation/ListenerViewModel` — bridges the two: it pipes
-  `SignalingClient.messages` into the receiver and forwards
-  `receiver.outboundSignals` back out through `SignalingClient.send`, and exposes
-  connection state + coarse stats to `ListenerPage`.
+## Pairing and session codes
 
-This seam is why the two integration fixes in the 2026-07-06 pass were localized:
-the join-response shape lives entirely in `features/sessions`, and the
-`viewer.ready` handshake correction lives entirely in the signaling/receiver seam
-(`SignalingClient` stopped auto-sending it; `WebRtcReceiverService` now emits it in
-reply to `publisher.ready`).
+Pairing and session join are intentionally distinct:
 
-## Security posture
+- Pairing accepts the exact QR JSON `{challengeId, code}` or the same two manual
+  fields. The camera is opened only by the dedicated scanner screen.
+- Session join accepts only `{"code":"ABC123"}`. Device identity comes from
+  `Authorization: DeviceBearer <device_access_token>`; the body has no device
+  identifier.
+- An active pairing is required for a new join. Revoking pairing leaves a stream
+  that is already active alone.
 
-- Media is peer-to-peer (or via TURN); the backend routes only signaling JSON and
-  is never a media relay.
-- SDP and ICE candidate payload bodies are never logged anywhere in the transport
-  or the receiver.
-- The viewer is receive-only: it never captures a microphone, never adds a local
-  track, and never handles video.
+## Signaling / WebRTC seam
+
+- `core/websocket/WebSocketClient` is a reconnecting JSON transport with an
+  injected error-classification policy.
+- `features/signaling/SignalingClient` connects with only `sessionId` in the
+  query and marks `DeviceIdentitySessionInvalidatedException` permanent, so a
+  revoked credential cannot create a reconnect loop.
+- `features/listener/data/WebRtcReceiverService` is signaling-agnostic and owns
+  the receive-only peer connection.
+- `features/listener/presentation/ListenerViewModel` bridges signaling messages,
+  outbound answers/candidates, connection state, and coarse statistics.
+
+SDP and ICE candidate bodies are never logged. Flutter never captures a
+microphone, adds a local media track, or handles video.
 
 ## Related docs
 
-- [integration-flow.md](integration-flow.md) — the verified end-to-end contract.
-- [troubleshooting.md](troubleshooting.md) — failure modes and the cross-repo mismatch.
+- [integration-flow.md](integration-flow.md) — Phase 3 end-to-end contract.
+- [troubleshooting.md](troubleshooting.md) — device identity, pairing, and media
+  failure modes.

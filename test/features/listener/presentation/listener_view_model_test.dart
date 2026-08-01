@@ -1,18 +1,23 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sonic_relay/app/di/app_providers.dart';
 import 'package:sonic_relay/core/diagnostics/diagnostic_log.dart';
-import 'package:sonic_relay/core/storage/secure_token_storage.dart';
+import 'package:sonic_relay/core/webrtc/rtc_ice_server_config.dart';
 import 'package:sonic_relay/core/webrtc/rtc_peer_connection_factory.dart';
 import 'package:sonic_relay/core/websocket/websocket_client.dart';
-import 'package:sonic_relay/features/auth/domain/auth_session.dart';
+import 'package:sonic_relay/features/device_identity/data/device_identity_session.dart';
 import 'package:sonic_relay/features/listener/data/audio_receiver_service.dart';
+import 'package:sonic_relay/features/listener/data/webrtc_receiver_service.dart';
 import 'package:sonic_relay/features/listener/presentation/listener_view_model.dart';
 import 'package:sonic_relay/features/sessions/domain/stream_session.dart';
 import 'package:sonic_relay/features/signaling/data/signaling_client.dart';
+
+DiagnosticLog _testLog() =>
+    DiagnosticLog(Directory.systemTemp.createTempSync('sonicrelay_test_').path);
 
 class FakeAudioReceiverService implements AudioReceiverService {
   int stopCount = 0;
@@ -42,61 +47,367 @@ class FakeWebSocketConnection implements WebSocketConnection {
     closed = true;
     await _controller.close();
   }
+
+  void emit(String data) => _controller.add(data);
 }
 
-class FakeTokenStorage implements TokenStorage {
-  @override
-  Future<AuthSession?> read() async => null;
+class SlowFailingCloseWebSocketConnection implements WebSocketConnection {
+  final _controller = StreamController<dynamic>.broadcast();
+  final closeStarted = Completer<void>();
+  final closeResult = Completer<void>();
 
   @override
-  Future<void> write(AuthSession session) async {}
+  Stream<dynamic> get stream => _controller.stream;
 
   @override
-  Future<void> clear() async {}
+  void add(String data) {}
+
+  @override
+  Future<void> close() {
+    closeStarted.complete();
+    return closeResult.future;
+  }
+
+  void emit(String data) => _controller.add(data);
+
+  Future<void> dispose() => _controller.close();
+}
+
+class FakeDeviceIdentitySession implements DeviceIdentitySession {
+  @override
+  Future<String> accessToken({bool forceRefresh = false}) async => 'token-1';
+
+  @override
+  Future<void> reset() async {}
+}
+
+class PendingDeviceIdentitySession implements DeviceIdentitySession {
+  final started = Completer<void>();
+  final token = Completer<String>();
+
+  @override
+  Future<String> accessToken({bool forceRefresh = false}) {
+    started.complete();
+    return token.future;
+  }
+
+  @override
+  Future<void> reset() async {}
+}
+
+class SlowAudioReceiverService implements AudioReceiverService {
+  final stopStarted = Completer<void>();
+  final stopResult = Completer<void>();
+
+  @override
+  bool get isPlaying => false;
+
+  @override
+  Future<void> play(RtcMediaStream stream) async {}
+
+  @override
+  Future<void> stop() {
+    if (!stopStarted.isCompleted) stopStarted.complete();
+    return stopResult.future;
+  }
+}
+
+class CountingRtcPeerConnectionFactory implements RtcPeerConnectionFactory {
+  var createCalls = 0;
+
+  @override
+  Future<RtcPeerConnection> create(RtcIceServerConfig iceServers) {
+    createCalls++;
+    throw StateError('peer connection must not be created after leave');
+  }
 }
 
 void main() {
-  test('leave tears down the receiver and closes the signaling socket', () async {
-    final audio = FakeAudioReceiverService();
-    late FakeWebSocketConnection connection;
-    final diagnosticLog = DiagnosticLog(Directory.systemTemp.createTempSync('sonicrelay_test_').path);
+  test(
+    'leave tears down the receiver and closes the signaling socket',
+    () async {
+      final audio = FakeAudioReceiverService();
+      late FakeWebSocketConnection connection;
+      final webSocketClient = WebSocketClient(
+        diagnosticLog: _testLog(),
+        connector: (uri, headers) async {
+          connection = FakeWebSocketConnection();
+          return connection;
+        },
+        scheduleTimer: (delay, callback) => Timer(Duration.zero, callback),
+      );
+      final signalingClient = SignalingClient(
+        webSocketClient: webSocketClient,
+        deviceIdentitySession: FakeDeviceIdentitySession(),
+        diagnosticLog: _testLog(),
+      );
+
+      final container = ProviderContainer(
+        overrides: [
+          audioReceiverServiceProvider.overrideWithValue(audio),
+          signalingClientProvider.overrideWithValue(signalingClient),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      // Force the receiver + view model to build and subscribe.
+      container.read(listenerViewModelProvider);
+
+      await signalingClient.connect(
+        session: StreamSession(
+          sessionId: 'session-1',
+          signalingUrl: Uri.parse('wss://stream.example/ws/signaling'),
+        ),
+      );
+      await Future<void>.delayed(Duration.zero);
+
+      await container.read(listenerViewModelProvider.notifier).leave();
+
+      expect(audio.stopCount, greaterThanOrEqualTo(1));
+      expect(connection.closed, isTrue);
+    },
+  );
+
+  test(
+    'leave invalidates pending signaling before slow receiver teardown',
+    () async {
+      final identity = PendingDeviceIdentitySession();
+      final audio = SlowAudioReceiverService();
+      final peerFactory = CountingRtcPeerConnectionFactory();
+      final receiver = WebRtcReceiverService(
+        peerConnectionFactory: peerFactory,
+        audioReceiver: audio,
+      );
+      var connectorCalls = 0;
+      FakeWebSocketConnection? lateConnection;
+      final webSocketClient = WebSocketClient(
+        diagnosticLog: _testLog(),
+        connector: (uri, headers) async {
+          connectorCalls++;
+          lateConnection = FakeWebSocketConnection();
+          return lateConnection!;
+        },
+        scheduleTimer: (delay, callback) => Timer(Duration.zero, callback),
+      );
+      final signalingClient = SignalingClient(
+        webSocketClient: webSocketClient,
+        deviceIdentitySession: identity,
+        diagnosticLog: _testLog(),
+      );
+      final container = ProviderContainer(
+        overrides: [
+          signalingClientProvider.overrideWithValue(signalingClient),
+          webRtcReceiverServiceProvider.overrideWithValue(receiver),
+        ],
+      );
+      addTearDown(() async {
+        if (!audio.stopResult.isCompleted) audio.stopResult.complete();
+        container.dispose();
+        await signalingClient.dispose();
+        await receiver.dispose();
+      });
+      final listener = container.read(listenerViewModelProvider.notifier);
+      final connecting = listener.connect(
+        session: StreamSession(
+          sessionId: 'session-1',
+          signalingUrl: Uri.parse('wss://stream.example/ws/signaling'),
+        ),
+      );
+      await identity.started.future;
+
+      final leaving = listener.leave();
+      await audio.stopStarted.future;
+      identity.token.complete('late-token');
+      await connecting;
+      await Future<void>.delayed(Duration.zero);
+      final connection = lateConnection;
+      if (connection != null && !connection.closed) {
+        connection.emit(
+          jsonEncode({
+            'type': 'webrtc.offer',
+            'messageId': 'late-offer',
+            'sessionId': 'session-1',
+            'from': 'publisher-1',
+            'timestamp': DateTime.now().toUtc().toIso8601String(),
+            'payload': {'sdp': 'late-sdp', 'type': 'offer'},
+          }),
+        );
+        await Future<void>.delayed(Duration.zero);
+        await Future<void>.delayed(Duration.zero);
+      }
+      final connectorCallsBeforeReceiverFinished = connectorCalls;
+      final peerCreatesBeforeReceiverFinished = peerFactory.createCalls;
+
+      audio.stopResult.complete();
+      await leaving;
+
+      expect(connectorCallsBeforeReceiverFinished, 0);
+      expect(peerCreatesBeforeReceiverFinished, 0);
+    },
+  );
+
+  test('leave closes a late connector before slow receiver teardown', () async {
+    final audio = SlowAudioReceiverService();
+    final peerFactory = CountingRtcPeerConnectionFactory();
+    final receiver = WebRtcReceiverService(
+      peerConnectionFactory: peerFactory,
+      audioReceiver: audio,
+    );
+    final connectorStarted = Completer<void>();
+    final connectorResult = Completer<WebSocketConnection>();
+    final lateConnection = FakeWebSocketConnection();
     final webSocketClient = WebSocketClient(
-      diagnosticLog: diagnosticLog,
-      connector: (uri, headers) async {
-        connection = FakeWebSocketConnection();
-        return connection;
+      diagnosticLog: _testLog(),
+      connector: (uri, headers) {
+        connectorStarted.complete();
+        return connectorResult.future;
       },
       scheduleTimer: (delay, callback) => Timer(Duration.zero, callback),
     );
     final signalingClient = SignalingClient(
       webSocketClient: webSocketClient,
-      tokenStorage: FakeTokenStorage(),
-      diagnosticLog: diagnosticLog,
+      deviceIdentitySession: FakeDeviceIdentitySession(),
+      diagnosticLog: _testLog(),
     );
-
     final container = ProviderContainer(
       overrides: [
-        audioReceiverServiceProvider.overrideWithValue(audio),
         signalingClientProvider.overrideWithValue(signalingClient),
+        webRtcReceiverServiceProvider.overrideWithValue(receiver),
       ],
     );
-    addTearDown(container.dispose);
-
-    // Force the receiver + view model to build and subscribe.
-    container.read(listenerViewModelProvider);
-
-    await signalingClient.connect(
+    addTearDown(() async {
+      if (!audio.stopResult.isCompleted) audio.stopResult.complete();
+      if (!connectorResult.isCompleted) {
+        connectorResult.complete(lateConnection);
+      }
+      container.dispose();
+      await signalingClient.dispose();
+      await receiver.dispose();
+    });
+    final listener = container.read(listenerViewModelProvider.notifier);
+    final connecting = listener.connect(
       session: StreamSession(
         sessionId: 'session-1',
         signalingUrl: Uri.parse('wss://stream.example/ws/signaling'),
       ),
-      deviceId: 'device-1',
     );
+    await connectorStarted.future;
+
+    final leaving = listener.leave();
+    await audio.stopStarted.future;
+    connectorResult.complete(lateConnection);
+    await connecting;
     await Future<void>.delayed(Duration.zero);
+    if (!lateConnection.closed) {
+      lateConnection.emit(
+        jsonEncode({
+          'type': 'webrtc.offer',
+          'messageId': 'late-offer',
+          'sessionId': 'session-1',
+          'from': 'publisher-1',
+          'timestamp': DateTime.now().toUtc().toIso8601String(),
+          'payload': {'sdp': 'late-sdp', 'type': 'offer'},
+        }),
+      );
+      await Future<void>.delayed(Duration.zero);
+      await Future<void>.delayed(Duration.zero);
+    }
+    final socketClosedBeforeReceiverFinished = lateConnection.closed;
+    final peerCreatesBeforeReceiverFinished = peerFactory.createCalls;
 
-    await container.read(listenerViewModelProvider.notifier).leave();
+    audio.stopResult.complete();
+    await leaving;
 
-    expect(audio.stopCount, greaterThanOrEqualTo(1));
-    expect(connection.closed, isTrue);
+    expect(socketClosedBeforeReceiverFinished, isTrue);
+    expect(peerCreatesBeforeReceiverFinished, 0);
   });
+
+  test(
+    'leave stops offers immediately and awaits slow receiver after socket close fails',
+    () async {
+      final audio = SlowAudioReceiverService();
+      final peerFactory = CountingRtcPeerConnectionFactory();
+      final receiver = WebRtcReceiverService(
+        peerConnectionFactory: peerFactory,
+        audioReceiver: audio,
+      );
+      final connection = SlowFailingCloseWebSocketConnection();
+      final webSocketClient = WebSocketClient(
+        diagnosticLog: _testLog(),
+        connector: (uri, headers) async => connection,
+        scheduleTimer: (delay, callback) => Timer(Duration.zero, callback),
+      );
+      final signalingClient = SignalingClient(
+        webSocketClient: webSocketClient,
+        deviceIdentitySession: FakeDeviceIdentitySession(),
+        diagnosticLog: _testLog(),
+      );
+      final container = ProviderContainer(
+        overrides: [
+          signalingClientProvider.overrideWithValue(signalingClient),
+          webRtcReceiverServiceProvider.overrideWithValue(receiver),
+        ],
+      );
+      addTearDown(() async {
+        if (!connection.closeResult.isCompleted) {
+          connection.closeResult.complete();
+        }
+        if (!audio.stopResult.isCompleted) audio.stopResult.complete();
+        container.dispose();
+        await signalingClient.dispose();
+        await receiver.dispose();
+        await connection.dispose();
+      });
+      final listener = container.read(listenerViewModelProvider.notifier);
+      await listener.connect(
+        session: StreamSession(
+          sessionId: 'session-1',
+          signalingUrl: Uri.parse('wss://stream.example/ws/signaling'),
+        ),
+      );
+      await Future<void>.delayed(Duration.zero);
+
+      Object? leaveError;
+      StackTrace? leaveStack;
+      var leaveCompleted = false;
+      final leaving = listener.leave().then<void>(
+        (_) => leaveCompleted = true,
+        onError: (Object error, StackTrace stack) {
+          leaveError = error;
+          leaveStack = stack;
+          leaveCompleted = true;
+        },
+      );
+      await connection.closeStarted.future;
+
+      connection.emit(
+        jsonEncode({
+          'type': 'webrtc.offer',
+          'messageId': 'late-offer',
+          'sessionId': 'session-1',
+          'from': 'publisher-1',
+          'timestamp': DateTime.now().toUtc().toIso8601String(),
+          'payload': {'sdp': 'late-sdp', 'type': 'offer'},
+        }),
+      );
+      await Future<void>.delayed(Duration.zero);
+      await Future<void>.delayed(Duration.zero);
+      final receiverStartedWhileSocketClosePending =
+          audio.stopStarted.isCompleted;
+      final socketError = StateError('socket close failed');
+      final socketStack = StackTrace.fromString('socket-close-stack');
+      connection.closeResult.completeError(socketError, socketStack);
+      await Future<void>.delayed(Duration.zero);
+      final leaveCompletedBeforeReceiverFinished = leaveCompleted;
+
+      audio.stopResult.complete();
+      await leaving;
+
+      expect(receiverStartedWhileSocketClosePending, isTrue);
+      expect(peerFactory.createCalls, 0);
+      expect(leaveCompletedBeforeReceiverFinished, isFalse);
+      expect(leaveError, same(socketError));
+      expect(leaveStack.toString(), socketStack.toString());
+    },
+  );
 }

@@ -10,6 +10,13 @@ void main() {
       );
     });
 
+    test('redacts DeviceBearer tokens', () {
+      expect(
+        DiagnosticRedactor.redact('Authorization: DeviceBearer abc.def-123'),
+        'Authorization: Bearer [REDACTED]',
+      );
+    });
+
     test('redacts JWT-like strings', () {
       const jwt =
           'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PYE0d';

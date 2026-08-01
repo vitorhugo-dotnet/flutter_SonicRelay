@@ -19,7 +19,7 @@ The app uses Feature Driven Development:
 - `lib/core`: reusable technical infrastructure such as HTTP, secure storage, WebSocket, and WebRTC adapters.
 - `lib/features`: user-facing capabilities. Each feature owns its `data`, `domain`, and `presentation` boundaries when applicable.
 
-Riverpod provides state and dependency composition, go_router handles guarded navigation, Dio provides HTTP infrastructure, and sensitive tokens are stored only through a flutter_secure_storage-backed abstraction. The viewer receives audio over WebRTC (`flutter_webrtc`); the backend only handles auth, sessions, and signaling and is never a media relay.
+Riverpod provides state and dependency composition, go_router handles guarded navigation, and Dio provides HTTP infrastructure. A single `DeviceIdentitySession` supplies short-lived device bearer tokens to HTTP and signaling consumers. The long-lived device credential is stored only through `flutter_secure_storage`; it is never written to SharedPreferences or logs. The viewer receives audio over WebRTC (`flutter_webrtc`); the backend only handles device identity, pairing, sessions, and signaling and is never a media relay.
 
 ## Local development
 
@@ -38,7 +38,7 @@ flutter run \
   --dart-define=SONIC_RELAY_WS_URL=wss://api.example.com
 ```
 
-Routes are `/login`, `/join`, `/session/waiting`, `/listener`, and `/settings`. All routes except `/login` are protected; startup restores a stored session before deciding which route to show.
+Routes are `/loading`, `/device-setup`, `/pair`, `/join`, `/session/waiting`, `/listener`, and `/settings`. There is no production account-login route. Startup prepares the device identity and checks for an active publisher pairing before any protected session screen can open.
 
 ## Continuous integration
 
@@ -61,58 +61,50 @@ flutter test
 flutter build apk --release
 ```
 
-## Session join flow
+## Device identity and pairing
 
-An authenticated viewer enters the temporary code shown by the Windows publisher on `/join`. The app trims and normalizes the code to uppercase, validates its shape locally, and requires the backend-issued viewer device UUID before sending:
+The viewer does not use a human account login. On first launch it bootstraps a `flutter_viewer` identity with `POST /api/devices/bootstrap`, stores the returned device id, credential secret, credential version, device type, and platform in secure storage, then exchanges that credential through `POST /api/devices/token`. Authenticated API and WebSocket requests use the resulting short-lived token:
+
+```text
+Authorization: DeviceBearer <device_access_token>
+```
+
+Tokens are cached only in memory and refreshed by the shared `DeviceIdentitySession`. A rejected credential is cleared and routes the app back through `/device-setup`; it never falls back to account login or refresh tokens. Resetting the device identity removes the secure credential and requires the viewer to pair again before joining future sessions.
+
+On `/pair`, the viewer can scan the QR code displayed by SonicRelay Windows or enter the same challenge id and pairing code manually. The QR payload is strict JSON with exactly these two fields:
 
 ```json
 {
-  "code": "ABC123",
-  "deviceId": "viewer_device_uuid"
+  "challengeId": "00000000-0000-0000-0000-000000000001",
+  "code": "ABC12345"
 }
 ```
 
-The authenticated Dio client calls `POST /api/sessions/join`. The backend responds with the full session record — `{ id, ownerUserId, sourceDeviceId, status, maxViewers, codeExpiresAt, startedAt, endedAt, createdAt, code }`. The response does **not** carry a signaling URL: the client reads `id` as the session id and builds the signaling URL itself from `SONIC_RELAY_WS_URL` + `/ws/signaling`. This context is kept in memory for signaling; it is not persisted. The app then opens `/session/waiting`, where it displays the prepared connection context until a later signaling feature connects the stream.
+The camera permission is requested only when the dedicated QR scanner screen is opened. Denying it leaves the manual pairing path available. Pairing uses `POST /api/pairings/complete`, listing uses `GET /api/devices/{deviceId}/pairings`, and revocation uses `DELETE /api/pairings/{pairingId}`. Revocation blocks future joins but does not terminate a session that is already active.
 
-Invalid or expired codes and full sessions show specific messages. Network failures can be retried, and an unauthorized response clears the authenticated UI state so the router returns to `/login`.
+## Session join flow
 
-## Backend authentication contract
+After device setup and pairing, the viewer enters the separate temporary session code shown by the Windows publisher on `/join`. The app trims and normalizes it to uppercase, validates its shape locally, and sends only the session code:
 
-The configured API must expose:
-
-```text
-POST /auth/register
-POST /auth/login
-POST /auth/refresh
-POST /auth/logout
-GET  /auth/me
+```json
+{
+  "code": "ABC123"
+}
 ```
 
-Login uses the ASP.NET Identity bearer-token contract. Access and refresh tokens are persisted through `TokenStorage` backed by `flutter_secure_storage`; they are never written to SharedPreferences or logs. A `401` response triggers one refresh attempt and retries the original request. If refresh fails, local tokens are cleared and the app returns to `/login`.
+The device-authenticated Dio client calls `POST /api/sessions/join`. The backend accepts the join only when an active pairing exists. It responds with the full session record — `{ id, ownerUserId, sourceDeviceId, status, maxViewers, codeExpiresAt, startedAt, endedAt, createdAt, code }`. The response does **not** carry a signaling URL: the client reads `id` as the session id and builds the signaling URL itself from `SONIC_RELAY_WS_URL` + `/ws/signaling`. This context is kept in memory for signaling; it is not persisted. The app then opens `/session/waiting`, where it displays the prepared connection context until signaling connects the stream.
+
+Invalid or expired session codes and full sessions show specific messages. Network failures can be retried. An unauthorized response invalidates device readiness so the router returns to `/device-setup`, never to an account-login flow.
 
 `SONIC_RELAY_API_URL` is required for a deployed backend. The localhost value in `AppConfig` is intended only for local development; production URLs are not embedded in the app.
 
-## Device registration
-
-After an authenticated session is restored or created, the app registers the installation through the authenticated HTTP client as type `flutter_viewer` and platform `android` or `ios`. The backend-issued device UUID is stored separately from auth tokens through a secure-storage-backed `DeviceIdStorage`; the human-readable device name is never used as an identifier.
-
-On later launches, the app validates the stored UUID with `GET /api/devices/{deviceId}` and reuses an active record. A missing or revoked record is replaced through `POST /api/devices`, and the new UUID is persisted for future session join and WebSocket signaling. Settings uses `GET /api/devices` to show the account's registered devices and registration errors without invalidating the authenticated session.
-
-Required device endpoints:
-
-```text
-POST /api/devices
-GET  /api/devices
-GET  /api/devices/{deviceId}
-```
-
 ## WebSocket signaling contract
 
-After a successful `POST /api/sessions/join`, the viewer opens an authenticated WebSocket connection to `<SONIC_RELAY_WS_URL>/ws/signaling`, with `sessionId` and the viewer's `deviceId` appended as query parameters and the current access token sent as a bearer header:
+After a successful `POST /api/sessions/join`, the viewer opens a device-authenticated WebSocket connection to `<SONIC_RELAY_WS_URL>/ws/signaling`, with only `sessionId` appended as a query parameter and the current device token sent as a bearer header:
 
 ```text
-GET /ws/signaling?sessionId={sessionId}&deviceId={deviceId}
-Authorization: Bearer <access_token>
+GET /ws/signaling?sessionId={sessionId}
+Authorization: DeviceBearer <device_access_token>
 ```
 
 Every frame is a typed JSON envelope:
@@ -191,7 +183,7 @@ While a stream is active, SonicRelay keeps receiving and playing audio when the 
 
 - **Feature slice** `lib/features/background`:
   - `ForegroundStreamService` — abstraction over the native service. `AndroidForegroundStreamServiceBridge` talks to the Kotlin `SonicRelayForegroundService` over the `sonicrelay/foreground` method channel and receives notification-button taps (`open`/`stop`/`reconnect`) over the `sonicrelay/foreground/events` event channel. Every other platform uses `NoopForegroundStreamService`.
-  - `StreamLifecycleController` — the pure, unit-tested decision core. It starts the service when the app is backgrounded during an active stream (and the setting is on), updates the notification as the connection state changes, stops it on return to foreground / stream end / logout, and enforces a **bounded** background reconnect window (default 45s) after which it stops the service and shows a "stream ended" notice.
+- `StreamLifecycleController` — the pure, unit-tested decision core. It starts the service when the app is backgrounded during an active stream (and the setting is on), updates the notification as the connection state changes, stops it on return to foreground / stream end / explicit leave, and enforces a **bounded** background reconnect window (default 45s) after which it stops the service and shows a "stream ended" notice.
 - **Notification actions:** Open (focus the app), Stop (leave the session), and Reconnect (while reconnecting).
 - **Setting:** `Settings → Playback → Keep audio playing in background` (persisted, on by default). It only has any effect while a stream the user started is active.
 - **Manifest:** declares the `mediaPlayback` service and the `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_MEDIA_PLAYBACK`, and `POST_NOTIFICATIONS` permissions. The service is never started from `BOOT_COMPLETED`. No token/session data is ever placed in notifications, intents, logs, or plain storage.
@@ -203,20 +195,16 @@ While a stream is active, SonicRelay keeps receiving and playing audio when the 
 3. Notification **Open** → returns to the live session with the correct state.
 4. Notification **Stop** → leaves the session and the service stops.
 5. Drop Wi-Fi briefly → "reconnecting" notification; restore → recovers. Leave it off past the window → service stops with a "stream ended" notice.
-6. Log out while streaming → the service stops.
-7. Android 14/15: no `MissingForegroundServiceTypeException` / `SecurityException`.
+6. Android 14/15: no `MissingForegroundServiceTypeException` / `SecurityException`.
 
 ## UI preview
 
-The current app provides a dark Material 3 shell with reusable controls, connected token authentication, and a listener dashboard that reflects live WebRTC connection state.
+The current app provides a dark Material 3 shell with reusable controls, device-first setup and pairing, and a listener dashboard that reflects live WebRTC connection state.
 
-To capture Android screenshots, run an emulator, start the app with `flutter run`, navigate through the local preview actions, and use the emulator screenshot control. Recommended captures are the login screen and the listener dashboard at a common phone size such as 1080 × 2400.
+To capture Android screenshots, run an emulator, start the app with `flutter run`, navigate through the local preview actions, and use the emulator screenshot control. Recommended captures are device setup, QR/manual pairing, and the listener dashboard at a common phone size such as 1080 × 2400.
 
 ## Known limitations
 
-Surfaced during the 2026-07-06 integration pass (see [docs/integration-flow.md](docs/integration-flow.md)):
-
-- **UI does not yet auto-open signaling.** `/session/waiting` shows the prepared connection context, but wiring join → open-signaling → navigate-to-`/listener` into a single UI flow is not done. The signaling and WebRTC layers are complete and unit-tested behind their view models.
-- **Windows publisher envelope mismatch.** The current [windows_SonicRelay](https://github.com/vitorhugo-java/windows_SonicRelay) signaling envelope serializes a `viewerId` field and sends `publisher.ready` with no recipient, while the backend routes strictly on `to`/`from` participant UUIDs. Until the publisher aligns with the backend protocol, end-to-end audio will not establish. See [docs/troubleshooting.md](docs/troubleshooting.md).
+Current operational constraints (see [docs/integration-flow.md](docs/integration-flow.md)):
 - **Backend-provided TURN in production.** ICE servers, including short-lived TURN credentials, are fetched from `GET /api/webrtc/ice-servers`. The bundled `RtcIceServerConfig.defaults()` fallback (public STUN only, no TURN) is used only when that request fails and the app is a debug build; strict/symmetric NATs will fail to establish a media path in that fallback path.
 - **No live E2E in CI.** Verification is static contract alignment plus `flutter analyze`, `flutter test`, and an Android build — not a live audio session against a running backend and publisher.

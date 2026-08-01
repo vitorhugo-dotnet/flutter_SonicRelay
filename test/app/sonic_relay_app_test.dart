@@ -3,30 +3,21 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:sonic_relay/app/sonic_relay_app.dart';
 import 'package:sonic_relay/app/di/app_providers.dart';
-import 'package:sonic_relay/core/storage/secure_token_storage.dart';
-import 'package:sonic_relay/features/auth/domain/auth_session.dart';
+import 'package:sonic_relay/app/sonic_relay_app.dart';
 import 'package:sonic_relay/features/listener/presentation/listener_page.dart';
 import 'package:sonic_relay/features/sessions/presentation/join_session_page.dart';
 import 'package:sonic_relay/features/settings/presentation/settings_page.dart';
-
-class EmptyTokenStorage implements TokenStorage {
-  @override
-  Future<void> clear() async {}
-  @override
-  Future<AuthSession?> read() async => null;
-  @override
-  Future<void> write(AuthSession session) async {}
-}
 
 String _testDiagnosticsDirectory() =>
     Directory.systemTemp.createTempSync('sonicrelay_app_test_').path;
 
 ProviderScope testApp() => ProviderScope(
   overrides: [
-    tokenStorageProvider.overrideWithValue(EmptyTokenStorage()),
-    diagnosticsDirectoryProvider.overrideWithValue(_testDiagnosticsDirectory()),
+    deviceReadinessProvider.overrideWith(_ReadyReadinessNotifier.new),
+    diagnosticsDirectoryProvider.overrideWithValue(
+      _testDiagnosticsDirectory(),
+    ),
   ],
   child: const SonicRelayApp(),
 );
@@ -41,16 +32,18 @@ void main() {
     expect(materialApp.theme?.brightness, Brightness.dark);
   });
 
-  testWidgets('login presents branding and fields', (tester) async {
+  testWidgets('startup opens device-first join without any account UI', (
+    tester,
+  ) async {
     await tester.pumpWidget(testApp());
     await tester.pumpAndSettle();
 
-    expect(find.text('Hear every detail.'), findsOneWidget);
-    expect(find.text('Email'), findsOneWidget);
-    expect(find.text('Password'), findsOneWidget);
+    expect(find.text('Join stream'), findsOneWidget);
+    expect(find.text('Email'), findsNothing);
+    expect(find.text('Password'), findsNothing);
   });
 
-  testWidgets('feature pages show presentation-only status content', (
+  testWidgets('feature pages show device-first presentation content', (
     tester,
   ) async {
     // Fixed once per test: the ProviderScope below is reused (updated, not
@@ -67,7 +60,10 @@ void main() {
       await tester.pumpWidget(
         ProviderScope(
           overrides: [
-            diagnosticsDirectoryProvider.overrideWithValue(diagnosticsDirectory),
+            deviceReadinessProvider.overrideWith(_ReadyReadinessNotifier.new),
+            diagnosticsDirectoryProvider.overrideWithValue(
+              diagnosticsDirectory,
+            ),
           ],
           child: MaterialApp(
             theme: ThemeData.dark(useMaterial3: true),
@@ -89,10 +85,15 @@ void main() {
     expect(find.text('Server'), findsOneWidget);
     expect(find.text('Server URL'), findsOneWidget);
     expect(find.text('Appearance'), findsOneWidget);
-    expect(find.text('Log out'), findsOneWidget);
+    expect(find.text('Manage pairings'), findsOneWidget);
+    expect(find.text('Reset device identity'), findsOneWidget);
+    expect(find.text('Log out'), findsNothing);
+    expect(find.text('Delete account'), findsNothing);
   });
 
-  testWidgets('login fits a common small Android viewport', (tester) async {
+  testWidgets('device-first startup fits a common small Android viewport', (
+    tester,
+  ) async {
     tester.view.physicalSize = const Size(360, 640);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
@@ -103,4 +104,9 @@ void main() {
 
     expect(tester.takeException(), isNull);
   });
+}
+
+class _ReadyReadinessNotifier extends DeviceReadinessNotifier {
+  @override
+  DeviceReadinessState build() => const DeviceReadinessState.ready();
 }

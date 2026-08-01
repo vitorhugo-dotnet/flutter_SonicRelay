@@ -2,11 +2,18 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sonic_relay/core/diagnostics/diagnostic_log.dart';
-import 'package:sonic_relay/core/storage/secure_token_storage.dart';
 import 'package:sonic_relay/core/websocket/websocket_client.dart';
-import 'package:sonic_relay/features/auth/domain/auth_session.dart';
+import 'package:sonic_relay/features/device_identity/data/device_credential_storage.dart';
+import 'package:sonic_relay/features/device_identity/data/device_identity_api.dart';
+import 'package:sonic_relay/features/device_identity/data/device_identity_session.dart';
+import 'package:sonic_relay/features/device_identity/data/dto/bootstrap_device_request.dart';
+import 'package:sonic_relay/features/device_identity/data/dto/bootstrap_device_response.dart';
+import 'package:sonic_relay/features/device_identity/data/dto/device_token_request.dart';
+import 'package:sonic_relay/features/device_identity/data/dto/device_token_response.dart';
+import 'package:sonic_relay/features/device_identity/domain/device_credential.dart';
 import 'package:sonic_relay/features/sessions/domain/stream_session.dart';
 import 'package:sonic_relay/features/signaling/data/signaling_client.dart';
 import 'package:sonic_relay/features/signaling/domain/signaling_message_type.dart';
@@ -34,18 +41,63 @@ class FakeWebSocketConnection implements WebSocketConnection {
   void emit(String data) => _controller.add(data);
 }
 
-class FakeTokenStorage implements TokenStorage {
-  FakeTokenStorage(this._session);
-  AuthSession? _session;
+class MutableDeviceIdentitySession implements DeviceIdentitySession {
+  String token = 'token-abc';
+
+  final List<bool> forceRefreshes = [];
+  final List<Object> errors = [];
 
   @override
-  Future<AuthSession?> read() async => _session;
+  Future<String> accessToken({bool forceRefresh = false}) async {
+    forceRefreshes.add(forceRefresh);
+    if (errors.isNotEmpty) throw errors.removeAt(0);
+    return token;
+  }
 
   @override
-  Future<void> write(AuthSession session) async => _session = session;
+  Future<void> reset() async {}
+}
+
+class SupersededDeviceIdentitySession implements DeviceIdentitySession {
+  final firstStarted = Completer<void>();
+  final firstToken = Completer<String>();
+  var calls = 0;
 
   @override
-  Future<void> clear() async => _session = null;
+  Future<String> accessToken({bool forceRefresh = false}) {
+    calls++;
+    if (calls == 1) {
+      firstStarted.complete();
+      return firstToken.future;
+    }
+    return Future<String>.value('token-2');
+  }
+
+  @override
+  Future<void> reset() async {}
+}
+
+class ManualTimer implements Timer {
+  ManualTimer(this.delay, this._callback);
+
+  final Duration delay;
+  final void Function() _callback;
+  bool _active = true;
+
+  void fire() {
+    if (!_active) return;
+    _active = false;
+    _callback();
+  }
+
+  @override
+  void cancel() => _active = false;
+
+  @override
+  bool get isActive => _active;
+
+  @override
+  int get tick => _active ? 0 : 1;
 }
 
 Timer _instantTimer(Duration delay, void Function() callback) =>
@@ -60,6 +112,7 @@ void main() {
   late FakeWebSocketConnection connection;
   late SignalingClient signalingClient;
   late StreamSession session;
+  late MutableDeviceIdentitySession identity;
 
   setUp(() {
     requestedUris = [];
@@ -74,51 +127,251 @@ void main() {
       },
       scheduleTimer: _instantTimer,
     );
+    identity = MutableDeviceIdentitySession();
     signalingClient = SignalingClient(
       webSocketClient: webSocketClient,
-      tokenStorage: FakeTokenStorage(
-        const AuthSession(
-          accessToken: 'token-abc',
-          refreshToken: 'refresh',
-          expiresIn: 3600,
-          tokenType: 'Bearer',
-        ),
-      ),
+      deviceIdentitySession: identity,
       diagnosticLog: _testLog(),
     );
     session = StreamSession(
       sessionId: 'session-1',
       signalingUrl: Uri.parse(
-        'wss://stream.example/ws/signaling?sessionId=session-1',
+        'wss://stream.example/ws/signaling?deviceId=legacy&unexpected=value',
       ),
     );
   });
 
   tearDown(() => signalingClient.dispose());
 
-  test('connects with sessionId/deviceId query params and bearer auth', () async {
-    await signalingClient.connect(session: session, deviceId: 'device-9');
+  test('connects with only sessionId and DeviceBearer auth', () async {
+    await signalingClient.connect(session: session);
     await Future<void>.delayed(Duration.zero);
 
     expect(requestedUris, hasLength(1));
     final uri = requestedUris.single;
-    expect(uri.queryParameters['sessionId'], 'session-1');
-    expect(uri.queryParameters['deviceId'], 'device-9');
-    expect(requestedHeaders.single['Authorization'], 'Bearer token-abc');
+    expect(uri.queryParameters, {'sessionId': 'session-1'});
+    expect(requestedHeaders.single['Authorization'], 'DeviceBearer token-abc');
+  });
+
+  test('reconnect obtains a fresh DeviceBearer token', () async {
+    await signalingClient.connect(session: session);
+    await Future<void>.delayed(Duration.zero);
+    identity.token = 'token-2';
+
+    await connection.close();
+    for (var i = 0; i < 6 && requestedHeaders.length < 2; i++) {
+      await Future<void>.delayed(Duration.zero);
+    }
+
+    expect(requestedHeaders, hasLength(2));
+    expect(requestedHeaders[0]['Authorization'], 'DeviceBearer token-abc');
+    expect(requestedHeaders[1]['Authorization'], 'DeviceBearer token-2');
+    expect(identity.forceRefreshes, [false, true]);
+  });
+
+  test('transient token failure retries and then connects', () async {
+    identity.errors.add(Exception('token temporarily unavailable'));
+    identity.token = 'token-2';
+
+    await signalingClient.connect(session: session);
+    for (var i = 0; i < 6 && requestedHeaders.isEmpty; i++) {
+      await Future<void>.delayed(Duration.zero);
+    }
+
+    expect(identity.forceRefreshes, [false, true]);
+    expect(requestedHeaders.single['Authorization'], 'DeviceBearer token-2');
+  });
+
+  test('leave cancels retry after a transient token failure', () async {
+    final timers = <ManualTimer>[];
+    final localIdentity = MutableDeviceIdentitySession()
+      ..errors.add(Exception('token temporarily unavailable'));
+    var connectorCalls = 0;
+    final webSocketClient = WebSocketClient(
+      diagnosticLog: _testLog(),
+      connector: (uri, headers) async {
+        connectorCalls++;
+        return FakeWebSocketConnection();
+      },
+      scheduleTimer: (delay, callback) {
+        final timer = ManualTimer(delay, callback);
+        timers.add(timer);
+        return timer;
+      },
+    );
+    final localClient = SignalingClient(
+      webSocketClient: webSocketClient,
+      deviceIdentitySession: localIdentity,
+      diagnosticLog: _testLog(),
+    );
+    addTearDown(localClient.dispose);
+
+    await localClient.connect(session: session);
+    final retry = timers.single;
+    await localClient.leave();
+    retry.fire();
+    await Future<void>.delayed(Duration.zero);
+
+    expect(retry.isActive, isFalse);
+    expect(localIdentity.forceRefreshes, [false]);
+    expect(connectorCalls, 0);
+  });
+
+  test(
+    'revoked identity during reconnect stops without another retry',
+    () async {
+      final timers = <ManualTimer>[];
+      final states = <SignalingConnectionState>[];
+      final localIdentity = MutableDeviceIdentitySession();
+      late FakeWebSocketConnection localConnection;
+      var connectorCalls = 0;
+      final webSocketClient = WebSocketClient(
+        diagnosticLog: _testLog(),
+        connector: (uri, headers) async {
+          connectorCalls++;
+          localConnection = FakeWebSocketConnection();
+          return localConnection;
+        },
+        scheduleTimer: (delay, callback) {
+          final timer = ManualTimer(delay, callback);
+          timers.add(timer);
+          return timer;
+        },
+      );
+      final localClient = SignalingClient(
+        webSocketClient: webSocketClient,
+        deviceIdentitySession: localIdentity,
+        diagnosticLog: _testLog(),
+      );
+      addTearDown(localClient.dispose);
+      final subscription = localClient.connectionState.listen(states.add);
+      addTearDown(subscription.cancel);
+
+      await localClient.connect(session: session);
+      localIdentity.errors.add(
+        const DeviceIdentitySessionInvalidatedException(),
+      );
+      await localConnection.close();
+      await Future<void>.delayed(Duration.zero);
+      expect(timers, hasLength(1));
+
+      timers.single.fire();
+      await Future<void>.delayed(Duration.zero);
+      await Future<void>.delayed(Duration.zero);
+
+      expect(connectorCalls, 1);
+      expect(localIdentity.forceRefreshes, [false, true]);
+      expect(timers, hasLength(1));
+      expect(states.last, SignalingConnectionState.disconnected);
+    },
+  );
+
+  test(
+    'revocation cleanup failure still publishes once and stops reconnecting',
+    () async {
+      final timers = <ManualTimer>[];
+      final localApi = _RevocableDeviceIdentityApi();
+      final localStorage = _FailingClearCredentialStorage();
+      var invalidations = 0;
+      final localIdentity = DeviceIdentitySession(
+        api: localApi,
+        storage: localStorage,
+        deviceName: 'Pixel 9',
+        platform: 'android',
+        onInvalidated: () => invalidations++,
+      );
+      late FakeWebSocketConnection localConnection;
+      var connectorCalls = 0;
+      final webSocketClient = WebSocketClient(
+        diagnosticLog: _testLog(),
+        connector: (uri, headers) async {
+          connectorCalls++;
+          localConnection = FakeWebSocketConnection();
+          return localConnection;
+        },
+        scheduleTimer: (delay, callback) {
+          final timer = ManualTimer(delay, callback);
+          timers.add(timer);
+          return timer;
+        },
+      );
+      final localClient = SignalingClient(
+        webSocketClient: webSocketClient,
+        deviceIdentitySession: localIdentity,
+        diagnosticLog: _testLog(),
+      );
+      addTearDown(localClient.dispose);
+
+      await localClient.connect(session: session);
+      localApi.revoked = true;
+      await localConnection.close();
+      await Future<void>.delayed(Duration.zero);
+      expect(timers, hasLength(1));
+
+      timers.single.fire();
+      await Future<void>.delayed(Duration.zero);
+      await Future<void>.delayed(Duration.zero);
+
+      expect(invalidations, 1);
+      expect(localStorage.clearCalls, 1);
+      expect(connectorCalls, 1);
+      expect(timers, hasLength(1));
+      await expectLater(
+        localIdentity.accessToken(),
+        throwsA(isA<DeviceIdentitySessionInvalidatedException>()),
+      );
+    },
+  );
+
+  test('a newer session supersedes an in-flight token operation', () async {
+    final localIdentity = SupersededDeviceIdentitySession();
+    final uris = <Uri>[];
+    final webSocketClient = WebSocketClient(
+      diagnosticLog: _testLog(),
+      connector: (uri, headers) async {
+        uris.add(uri);
+        return FakeWebSocketConnection();
+      },
+      scheduleTimer: _instantTimer,
+    );
+    final localClient = SignalingClient(
+      webSocketClient: webSocketClient,
+      deviceIdentitySession: localIdentity,
+      diagnosticLog: _testLog(),
+    );
+    addTearDown(localClient.dispose);
+    final firstSession = StreamSession(
+      sessionId: 'session-1',
+      signalingUrl: Uri.parse('wss://stream.example/ws/signaling'),
+    );
+    final secondSession = StreamSession(
+      sessionId: 'session-2',
+      signalingUrl: Uri.parse('wss://stream.example/ws/signaling'),
+    );
+
+    final firstConnect = localClient.connect(session: firstSession);
+    await localIdentity.firstStarted.future;
+    await localClient.connect(session: secondSession);
+    localIdentity.firstToken.complete('token-1');
+    await firstConnect;
+
+    expect(uris.map((uri) => uri.queryParameters), [
+      {'sessionId': 'session-2'},
+    ]);
   });
 
   test('does not auto-send viewer.ready on connect', () async {
     // `viewer.ready` is a routed message the backend rejects without a `to`
     // recipient. It is now sent by the WebRTC receiver in reply to
     // `publisher.ready`, not automatically on socket open.
-    await signalingClient.connect(session: session, deviceId: 'device-9');
+    await signalingClient.connect(session: session);
     await Future<void>.delayed(Duration.zero);
 
     expect(connection.sent, isEmpty);
   });
 
   test('sends a targeted message via send()', () async {
-    await signalingClient.connect(session: session, deviceId: 'device-9');
+    await signalingClient.connect(session: session);
     await Future<void>.delayed(Duration.zero);
 
     signalingClient.send(
@@ -135,7 +388,7 @@ void main() {
   });
 
   test('replies with pong when the server sends a ping', () async {
-    await signalingClient.connect(session: session, deviceId: 'device-9');
+    await signalingClient.connect(session: session);
     await Future<void>.delayed(Duration.zero);
 
     connection.emit(
@@ -157,7 +410,7 @@ void main() {
   });
 
   test('session.ended closes the connection and stops reconnecting', () async {
-    await signalingClient.connect(session: session, deviceId: 'device-9');
+    await signalingClient.connect(session: session);
     await Future<void>.delayed(Duration.zero);
 
     final states = <SignalingConnectionState>[];
@@ -182,61 +435,8 @@ void main() {
     await sub.cancel();
   });
 
-  test(
-    'reconnect re-reads the token so a rotated token is picked up',
-    () async {
-      final tokenStorage = FakeTokenStorage(
-        const AuthSession(
-          accessToken: 'token-abc',
-          refreshToken: 'refresh',
-          expiresIn: 3600,
-          tokenType: 'Bearer',
-        ),
-      );
-      final headersSeen = <Map<String, String>>[];
-      late FakeWebSocketConnection localConnection;
-      final webSocketClient = WebSocketClient(
-        diagnosticLog: _testLog(),
-        connector: (uri, headers) async {
-          headersSeen.add(headers);
-          localConnection = FakeWebSocketConnection();
-          return localConnection;
-        },
-        scheduleTimer: _instantTimer,
-      );
-      final client = SignalingClient(
-        webSocketClient: webSocketClient,
-        tokenStorage: tokenStorage,
-        diagnosticLog: _testLog(),
-      );
-      addTearDown(client.dispose);
-
-      await client.connect(session: session, deviceId: 'device-9');
-      await Future<void>.delayed(Duration.zero);
-
-      // The token rotates mid-outage (e.g. a background refresh completed).
-      await tokenStorage.write(
-        const AuthSession(
-          accessToken: 'token-xyz',
-          refreshToken: 'refresh-2',
-          expiresIn: 3600,
-          tokenType: 'Bearer',
-        ),
-      );
-      await localConnection.close();
-      await Future<void>.delayed(Duration.zero);
-      await Future<void>.delayed(Duration.zero);
-      await Future<void>.delayed(Duration.zero);
-
-      expect(headersSeen, [
-        {'Authorization': 'Bearer token-abc'},
-        {'Authorization': 'Bearer token-xyz'},
-      ]);
-    },
-  );
-
   test('forwards unknown message types without throwing', () async {
-    await signalingClient.connect(session: session, deviceId: 'device-9');
+    await signalingClient.connect(session: session);
     await Future<void>.delayed(Duration.zero);
 
     final messageFuture = signalingClient.messages.first;
@@ -254,4 +454,54 @@ void main() {
     expect(message.type, SignalingMessageType.unknown);
     expect(message.rawType, 'future.message');
   });
+}
+
+class _RevocableDeviceIdentityApi implements DeviceIdentityApi {
+  bool revoked = false;
+
+  @override
+  Future<BootstrapDeviceResponse> bootstrap(BootstrapDeviceRequest request) =>
+      throw StateError('bootstrap must not run');
+
+  @override
+  Future<DeviceTokenResponse> token(DeviceTokenRequest request) async {
+    if (revoked) {
+      throw DioException(
+        requestOptions: RequestOptions(path: '/api/devices/token'),
+        response: Response<void>(
+          requestOptions: RequestOptions(path: '/api/devices/token'),
+          statusCode: 401,
+        ),
+        type: DioExceptionType.badResponse,
+      );
+    }
+    return DeviceTokenResponse(
+      accessToken: 'device-token',
+      expiresAt: DateTime.now().toUtc().add(const Duration(hours: 1)),
+      scopes: const ['stream:listen'],
+    );
+  }
+}
+
+class _FailingClearCredentialStorage implements DeviceCredentialStorage {
+  DeviceCredential? credential = const DeviceCredential(
+    deviceId: 'viewer-1',
+    credentialSecret: 'secret-1',
+    credentialVersion: 1,
+    deviceType: 'flutter_viewer',
+    platform: 'android',
+  );
+  int clearCalls = 0;
+
+  @override
+  Future<void> clear() async {
+    clearCalls++;
+    throw const DeviceCredentialStorageException('clear failed');
+  }
+
+  @override
+  Future<DeviceCredential?> read() async => credential;
+
+  @override
+  Future<void> write(DeviceCredential value) async => credential = value;
 }

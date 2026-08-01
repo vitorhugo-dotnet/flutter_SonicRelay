@@ -28,9 +28,17 @@ typedef WebSocketConnector =
     Future<WebSocketConnection> Function(Uri uri, Map<String, String> headers);
 
 /// Produces connection headers (e.g. a bearer token) fresh for each connect
-/// attempt, so a token that expires mid-outage is picked up on the next retry
-/// instead of retrying forever with a stale, now-rejected header.
-typedef WebSocketHeadersProvider = FutureOr<Map<String, String>> Function();
+/// attempt, so a token that expires mid-outage is picked up on the next
+/// retry instead of retrying forever with a stale, now-rejected header.
+/// [isReconnect] is true for every attempt after the first, so a provider
+/// can force a token refresh only when retrying.
+typedef WebSocketHeadersProvider =
+    Future<Map<String, String>> Function(bool isReconnect);
+
+/// Decides whether a connect failure should be retried. Returning false
+/// stops all further reconnect attempts (e.g. when the device identity has
+/// been revoked and retrying would never succeed).
+typedef WebSocketReconnectPredicate = bool Function(Object error);
 
 /// Default [WebSocketConnector] backed by `dart:io`'s [WebSocket].
 Future<WebSocketConnection> ioWebSocketConnector(
@@ -141,79 +149,120 @@ class WebSocketClient {
   StreamSubscription<dynamic>? _subscription;
   Timer? _reconnectTimer;
   int _attempt = 0;
+  int _generation = 0;
   bool _stopped = true;
   Uri? _uri;
-  WebSocketHeadersProvider _headersProvider = _emptyHeaders;
+  Map<String, String> _headers = const {};
+  WebSocketHeadersProvider? _headersProvider;
+  WebSocketReconnectPredicate _shouldReconnectOnError = (_) => true;
 
-  static Map<String, String> _emptyHeaders() => const {};
-
-  Future<void> connect(Uri uri, {WebSocketHeadersProvider? headers}) async {
+  Future<void> connect(
+    Uri uri, {
+    Map<String, String> headers = const {},
+    WebSocketHeadersProvider? headersProvider,
+    WebSocketReconnectPredicate? shouldReconnectOnError,
+  }) async {
+    final generation = ++_generation;
     _stopped = false;
-    _uri = uri;
-    _headersProvider = headers ?? _emptyHeaders;
-    _attempt = 0;
     _reconnectTimer?.cancel();
-    await _attemptConnect();
+    _reconnectTimer = null;
+
+    final previousSubscription = _subscription;
+    _subscription = null;
+    final previousConnection = _connection;
+    _connection = null;
+    if (previousSubscription != null) {
+      await previousSubscription.cancel();
+      if (!_isCurrent(generation) && previousConnection == null) return;
+    }
+    if (previousConnection != null) {
+      await previousConnection.close();
+    }
+    if (!_isCurrent(generation)) return;
+
+    _uri = uri;
+    _headers = headers;
+    _headersProvider = headersProvider;
+    _shouldReconnectOnError = shouldReconnectOnError ?? (_) => true;
+    _attempt = 0;
+    await _attemptConnect(generation);
   }
 
-  Future<void> _attemptConnect() async {
-    if (_stopped) return;
+  Future<void> _attemptConnect(int generation) async {
+    if (!_isCurrent(generation)) return;
     if (_attempt == 0) {
       _stateController.add(WebSocketConnectionState.connecting);
     }
     try {
-      unawaited(_diagnosticLog.write('WebSocket', 'connecting to $_uri (attempt $_attempt)'));
-      // Resolved fresh on every attempt (not just the first) so a token that
-      // expired during the outage is refreshed before the next retry instead
-      // of retrying forever with a now-rejected header.
-      final headers = await _headersProvider();
-      final connection = await _connector(_uri!, headers);
-      if (_stopped) {
+      final uri = _uri!;
+      final isReconnect = _attempt > 0;
+      unawaited(
+        _diagnosticLog.write(
+          'WebSocket',
+          'connecting to $uri (attempt $_attempt)',
+        ),
+      );
+      final headersProvider = _headersProvider;
+      final headers = headersProvider == null
+          ? _headers
+          : await headersProvider(isReconnect);
+      if (!_isCurrent(generation)) return;
+      final connection = await _connector(uri, headers);
+      if (!_isCurrent(generation)) {
         await connection.close();
         return;
       }
       _connection = connection;
       _attempt = 0;
-      unawaited(_diagnosticLog.write('WebSocket', 'connected to $_uri'));
+      unawaited(_diagnosticLog.write('WebSocket', 'connected to $uri'));
       _stateController.add(WebSocketConnectionState.connected);
       _subscription = connection.stream.listen(
         (dynamic data) {
-          if (data is String) {
+          if (_isCurrent(generation) && data is String) {
             _messageController.add(WebSocketMessage.decode(data));
           }
         },
         onDone: () {
-          unawaited(_diagnosticLog.write('WebSocket', 'socket closed by peer'));
-          _disconnectReasonController.add(WebSocketDisconnectReason.serverClosed);
-          _handleDisconnect();
+          unawaited(
+            _diagnosticLog.write('WebSocket', 'socket closed by peer'),
+          );
+          _disconnectReasonController.add(
+            WebSocketDisconnectReason.serverClosed,
+          );
+          _handleDisconnect(generation, connection);
         },
         onError: (Object error) {
           unawaited(_diagnosticLog.write('WebSocket', 'socket error'));
-          _disconnectReasonController.add(WebSocketDisconnectReason.transportError);
-          _handleDisconnect();
+          _disconnectReasonController.add(
+            WebSocketDisconnectReason.transportError,
+          );
+          _handleDisconnect(generation, connection);
         },
         cancelOnError: true,
       );
     } catch (error) {
+      if (!_isCurrent(generation)) return;
       unawaited(_diagnosticLog.write('WebSocket', 'connect failed'));
       _disconnectReasonController.add(WebSocketDisconnectReason.connectFailed);
-      _scheduleReconnect();
+      if (!_shouldReconnectOnError(error)) {
+        _stopped = true;
+        _stateController.add(WebSocketConnectionState.disconnected);
+        return;
+      }
+      _scheduleReconnect(generation);
     }
   }
 
-  void _handleDisconnect() {
+  void _handleDisconnect(int generation, WebSocketConnection connection) {
+    if (!_isCurrent(generation) || !identical(_connection, connection)) return;
     unawaited(_subscription?.cancel());
     _subscription = null;
     _connection = null;
-    if (_stopped) {
-      _stateController.add(WebSocketConnectionState.disconnected);
-      return;
-    }
-    _scheduleReconnect();
+    _scheduleReconnect(generation);
   }
 
-  void _scheduleReconnect() {
-    if (_stopped) return;
+  void _scheduleReconnect(int generation) {
+    if (!_isCurrent(generation)) return;
     final jitterSample = _random.nextDouble() * 2 - 1;
     final delay = _reconnectPolicy.jitteredDelayForAttempt(
       _attempt,
@@ -222,21 +271,33 @@ class WebSocketClient {
     _attempt++;
     _stateController.add(WebSocketConnectionState.reconnecting);
     _reconnectTimer = _scheduleTimer(delay, () {
-      unawaited(_attemptConnect());
+      if (_isCurrent(generation)) {
+        unawaited(_attemptConnect(generation));
+      }
     });
   }
+
+  bool _isCurrent(int generation) => !_stopped && generation == _generation;
 
   /// Sends a raw text frame. Silently dropped while disconnected.
   void send(String data) => _connection?.add(data);
 
   /// Closes the connection and stops all reconnect attempts.
   Future<void> disconnect() async {
+    final generation = ++_generation;
     _stopped = true;
     _reconnectTimer?.cancel();
-    await _subscription?.cancel();
+    _reconnectTimer = null;
+    final subscription = _subscription;
     _subscription = null;
-    await _connection?.close();
+    final connection = _connection;
     _connection = null;
+    await subscription?.cancel();
+    final supersededAfterCancel = generation != _generation || !_stopped;
+    await connection?.close();
+    if (supersededAfterCancel || generation != _generation || !_stopped) {
+      return;
+    }
     _disconnectReasonController.add(WebSocketDisconnectReason.normal);
     _stateController.add(WebSocketConnectionState.disconnected);
   }

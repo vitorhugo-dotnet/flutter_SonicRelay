@@ -55,13 +55,10 @@ class SignalingStatusViewModel extends Notifier<SignalingStatusState> {
     return const SignalingStatusState();
   }
 
-  Future<void> connect({
-    required StreamSession session,
-    required String deviceId,
-  }) async {
+  Future<void> connect({required StreamSession session}) async {
     state = const SignalingStatusState(status: SignalingStatus.connecting);
     try {
-      await _client.connect(session: session, deviceId: deviceId);
+      await _client.connect(session: session);
     } catch (_) {
       state = const SignalingStatusState(
         status: SignalingStatus.error,
@@ -83,13 +80,11 @@ class SignalingStatusViewModel extends Notifier<SignalingStatusState> {
     state = SignalingStatusState(status: state.status, lastMessage: message);
   }
 
-  SignalingStatus _mapStatus(SignalingConnectionState value) =>
-      switch (value) {
-        SignalingConnectionState.connecting => SignalingStatus.connecting,
-        SignalingConnectionState.connected => SignalingStatus.connected,
-        SignalingConnectionState.reconnecting => SignalingStatus.reconnecting,
-        SignalingConnectionState.ended => SignalingStatus.ended,
-        SignalingConnectionState.disconnected =>
-          SignalingStatus.disconnected,
-      };
+  SignalingStatus _mapStatus(SignalingConnectionState value) => switch (value) {
+    SignalingConnectionState.connecting => SignalingStatus.connecting,
+    SignalingConnectionState.connected => SignalingStatus.connected,
+    SignalingConnectionState.reconnecting => SignalingStatus.reconnecting,
+    SignalingConnectionState.ended => SignalingStatus.ended,
+    SignalingConnectionState.disconnected => SignalingStatus.disconnected,
+  };
 }

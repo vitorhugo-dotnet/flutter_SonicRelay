@@ -1,8 +1,7 @@
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sonic_relay/app/env/app_config.dart';
-import 'package:sonic_relay/features/devices/data/devices_repository.dart';
-import 'package:sonic_relay/features/devices/domain/device.dart';
+import 'package:sonic_relay/core/http/manual_retry_required_exception.dart';
 import 'package:sonic_relay/features/sessions/data/dto/join_session_request.dart';
 import 'package:sonic_relay/features/sessions/data/dto/join_session_response.dart';
 import 'package:sonic_relay/features/sessions/data/sessions_api.dart';
@@ -20,21 +19,7 @@ class FakeSessionsApi implements SessionsApi {
   }
 }
 
-class FakeDevicesRepository implements DevicesRepository {
-  String? deviceId = 'viewer-device';
-
-  @override
-  Future<String?> readCurrentDeviceId() async => deviceId;
-
-  @override
-  Future<Device> ensureCurrentDevice({required String platform}) =>
-      throw UnimplementedError();
-
-  @override
-  Future<List<Device>> listDevices() => throw UnimplementedError();
-}
-
-DioException dioFailure(int status, String code) {
+DioException dioFailure(int status, String code, {Object? error}) {
   final options = RequestOptions(path: '/api/sessions/join');
   return DioException(
     requestOptions: options,
@@ -43,20 +28,18 @@ DioException dioFailure(int status, String code) {
       statusCode: status,
       data: {'code': code},
     ),
+    error: error,
   );
 }
 
 void main() {
   late FakeSessionsApi api;
-  late FakeDevicesRepository devices;
   late SessionsRepository repository;
 
   setUp(() {
     api = FakeSessionsApi();
-    devices = FakeDevicesRepository();
     repository = SessionsRepository(
       api: api,
-      devicesRepository: devices,
       config: const AppConfig(
         apiBaseUrl: 'http://api.example',
         webSocketBaseUrl: 'ws://api.example',
@@ -64,30 +47,38 @@ void main() {
     );
   });
 
-  test('joins with normalized code and registered viewer device', () async {
+  test('join request serializes only the normalized session code', () async {
     final session = await repository.join(' abc123 ');
 
-    expect(api.request?.code, 'ABC123');
-    expect(api.request?.deviceId, 'viewer-device');
+    expect(api.request?.toJson(), {'code': 'ABC123'});
     expect(session.sessionId, 'session-1');
     expect(session.signalingUrl, Uri.parse('ws://api.example/ws/signaling'));
     expect(repository.currentSession, same(session));
   });
 
-  test('requires a registered viewer device before calling the API', () async {
-    devices.deviceId = null;
+  test('maps refreshed unsafe 401 to a typed manual retry failure', () async {
+    api.error = dioFailure(
+      401,
+      'unauthorized',
+      error: const ManualRetryRequiredException(),
+    );
 
     await expectLater(
       repository.join('ABC123'),
       throwsA(
-        isA<SessionsFailure>().having(
-          (failure) => failure.kind,
-          'kind',
-          SessionsFailureKind.missingDevice,
-        ),
+        isA<SessionsFailure>()
+            .having(
+              (failure) => failure.kind,
+              'kind',
+              SessionsFailureKind.manualRetry,
+            )
+            .having(
+              (failure) => failure.message,
+              'message',
+              contains('Retry'),
+            ),
       ),
     );
-    expect(api.request, isNull);
   });
 
   for (final testCase

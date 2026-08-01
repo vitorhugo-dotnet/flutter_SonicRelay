@@ -1,7 +1,7 @@
 import 'package:dio/dio.dart';
 
 import '../../../app/env/app_config.dart';
-import '../../devices/data/devices_repository.dart';
+import '../../../core/http/manual_retry_required_exception.dart';
 import '../domain/stream_session.dart';
 import 'dto/join_session_request.dart';
 import 'sessions_api.dart';
@@ -12,6 +12,7 @@ enum SessionsFailureKind {
   expiredCode,
   maxViewers,
   unauthorized,
+  manualRetry,
   network,
   invalidResponse,
 }
@@ -24,33 +25,20 @@ class SessionsFailure implements Exception {
 }
 
 class SessionsRepository {
-  SessionsRepository({
-    required SessionsApi api,
-    required DevicesRepository devicesRepository,
-    required AppConfig config,
-  }) : _api = api,
-       _devicesRepository = devicesRepository,
-       _config = config;
+  SessionsRepository({required SessionsApi api, required AppConfig config})
+    : _api = api,
+      _config = config;
 
   final SessionsApi _api;
-  final DevicesRepository _devicesRepository;
   final AppConfig _config;
   StreamSession? _currentSession;
 
   StreamSession? get currentSession => _currentSession;
 
   Future<StreamSession> join(String code) async {
-    final deviceId = await _devicesRepository.readCurrentDeviceId();
-    if (deviceId == null || deviceId.isEmpty) {
-      throw const SessionsFailure(
-        SessionsFailureKind.missingDevice,
-        'This viewer is not registered yet. Retry device setup first.',
-      );
-    }
-
     try {
       final response = await _api.join(
-        JoinSessionRequest(code: code.trim().toUpperCase(), deviceId: deviceId),
+        JoinSessionRequest(code: code.trim().toUpperCase()),
       );
       final session = response.toDomain(_config.signalingUri);
       _currentSession = session;
@@ -66,6 +54,12 @@ class SessionsRepository {
   }
 
   SessionsFailure _mapDioFailure(DioException error) {
+    if (error.error is ManualRetryRequiredException) {
+      return const SessionsFailure(
+        SessionsFailureKind.manualRetry,
+        'Authorization refreshed. Retry joining the session.',
+      );
+    }
     final status = error.response?.statusCode;
     final data = error.response?.data;
     final text = data is Map

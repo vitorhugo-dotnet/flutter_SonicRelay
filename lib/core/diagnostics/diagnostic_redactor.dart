@@ -10,8 +10,13 @@ class DiagnosticRedactor {
 
   static const _redacted = '[REDACTED]';
 
+  // Matches both the plain `Bearer <token>` scheme and this app's
+  // `DeviceBearer <token>` scheme (device-identity access tokens). `\b`
+  // alone would not match "Bearer" glued onto "Device" since there is no
+  // word boundary between two letters, so the optional prefix is spelled
+  // out explicitly instead of relying on the boundary to separate them.
   static final _bearerToken = RegExp(
-    r'\bbearer\s+[^\s,;]+',
+    r'\b(?:device)?bearer\s+[^\s,;]+',
     caseSensitive: false,
   );
   static final _jwt = RegExp(

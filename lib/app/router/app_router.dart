@@ -2,36 +2,51 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../features/auth/presentation/login_page.dart';
-import '../../features/auth/presentation/login_view_model.dart';
 import '../../features/listener/presentation/listener_page.dart';
+import '../../features/pairing/presentation/pairing_page.dart';
+import '../../features/pairing/presentation/pairing_view_model.dart';
 import '../../features/sessions/presentation/join_session_page.dart';
 import '../../features/sessions/presentation/session_waiting_page.dart';
 import '../../features/settings/presentation/settings_page.dart';
+import '../di/app_providers.dart';
 
-String? authRedirect(AuthState auth, String location) {
-  if (auth.status == AuthStatus.restoring) {
-    return location == '/loading' ? null : '/loading';
+String? deviceIdentityRedirect(
+  DeviceReadinessState readiness,
+  String location,
+) {
+  switch (readiness.status) {
+    case DeviceReadinessStatus.restoring:
+      return location == '/loading' ? null : '/loading';
+    case DeviceReadinessStatus.deviceSetup:
+      return location == '/device-setup' ? null : '/device-setup';
+    case DeviceReadinessStatus.pairingRequired:
+      return location == '/pair' ? null : '/pair';
+    case DeviceReadinessStatus.ready:
+      if (location == '/loading' || location == '/device-setup') {
+        return '/join';
+      }
+      return null;
   }
-  if (!auth.isAuthenticated) {
-    return location == '/login' ? null : '/login';
-  }
-  if (location == '/login' || location == '/loading') return '/join';
-  return null;
 }
 
 final appRouterProvider = Provider<GoRouter>((ref) {
   final router = GoRouter(
-    initialLocation: '/login',
-    redirect: (context, state) =>
-        authRedirect(ref.read(authViewModelProvider), state.matchedLocation),
+    initialLocation: '/loading',
+    redirect: (context, state) => deviceIdentityRedirect(
+      ref.read(deviceReadinessProvider),
+      state.matchedLocation,
+    ),
     routes: [
-      GoRoute(path: '/login', builder: (context, state) => const LoginPage()),
       GoRoute(
         path: '/loading',
         builder: (context, state) =>
             const Scaffold(body: Center(child: CircularProgressIndicator())),
       ),
+      GoRoute(
+        path: '/device-setup',
+        builder: (context, state) => const _DeviceSetupPage(),
+      ),
+      GoRoute(path: '/pair', builder: (context, state) => const PairingPage()),
       GoRoute(
         path: '/join',
         builder: (context, state) => const JoinSessionPage(),
@@ -50,7 +65,61 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       ),
     ],
   );
-  ref.listen(authViewModelProvider, (_, _) => router.refresh());
+  ref.listen(deviceReadinessProvider, (_, _) => router.refresh());
+  ref.listen(pairingViewModelProvider, (previous, next) {
+    ref.read(deviceReadinessProvider.notifier).syncPairings(next.pairings);
+    if (previous?.status != PairingStatus.paired &&
+        next.status == PairingStatus.paired) {
+      router.go('/join');
+    }
+  });
   ref.onDispose(router.dispose);
   return router;
 });
+
+class _DeviceSetupPage extends ConsumerWidget {
+  const _DeviceSetupPage();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final readiness = ref.watch(deviceReadinessProvider);
+    final error = readiness.errorMessage;
+    return Scaffold(
+      appBar: AppBar(title: const Text('Set up this device')),
+      body: SafeArea(
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 480),
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.phonelink_lock_rounded, size: 56),
+                  const SizedBox(height: 20),
+                  Text(
+                    error ?? 'Preparing a secure identity for this device…',
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 20),
+                  if (error == null)
+                    const CircularProgressIndicator()
+                  else
+                    FilledButton(
+                      onPressed: () =>
+                          ref.read(deviceReadinessProvider.notifier).retry(),
+                      child: Text(
+                        readiness.requiresReset
+                            ? 'Reset device identity'
+                            : 'Retry device setup',
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
