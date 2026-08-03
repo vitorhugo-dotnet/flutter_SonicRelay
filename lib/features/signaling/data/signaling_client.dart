@@ -86,7 +86,7 @@ class SignalingClient {
         final token = await _deviceIdentitySession.accessToken(
           forceRefresh: isReconnect,
         );
-        return {'Authorization': 'DeviceBearer $token'};
+        return {'Authorization': 'Bearer $token'};
       },
       shouldReconnectOnError: (error) =>
           error is! DeviceIdentitySessionInvalidatedException,

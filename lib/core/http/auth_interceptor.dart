@@ -29,7 +29,7 @@ class AuthInterceptor extends Interceptor {
 
     try {
       final token = await _deviceIdentitySession.accessToken();
-      options.headers['Authorization'] = 'DeviceBearer $token';
+      options.headers['Authorization'] = 'Bearer $token';
       handler.next(options);
     } catch (error, stackTrace) {
       handler.reject(
@@ -64,7 +64,7 @@ class AuthInterceptor extends Interceptor {
         return;
       }
       request.extra['authRetried'] = true;
-      request.headers['Authorization'] = 'DeviceBearer $token';
+      request.headers['Authorization'] = 'Bearer $token';
       handler.resolve(await _replayDio.fetch<dynamic>(request));
     } on DioException catch (retryError) {
       handler.next(retryError);

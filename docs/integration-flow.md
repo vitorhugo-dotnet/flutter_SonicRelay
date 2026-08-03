@@ -24,7 +24,7 @@ deployments use `https://` and `wss://`.
 2. **Obtain a device token.** Flutter exchanges the credential through
    `POST /api/devices/token`. A single shared `DeviceIdentitySession` caches the
    short-lived token in memory and supplies it to HTTP and signaling as:
-   `Authorization: DeviceBearer <device_access_token>`.
+   `Authorization: Bearer <device_access_token>`.
 3. **Create a pairing challenge.** SonicRelay Windows displays both manual
    pairing fields and a QR payload containing exactly `challengeId` and `code`.
    Flutter requests camera access only after the user opens the QR scanner.
@@ -48,7 +48,7 @@ deployments use `https://` and `wss://`.
 
    ```text
    GET /ws/signaling?sessionId={sessionId}
-   Authorization: DeviceBearer <device_access_token>
+   Authorization: Bearer <device_access_token>
    ```
 
 8. **Negotiate WebRTC.** The publisher sends `publisher.ready`; Flutter replies

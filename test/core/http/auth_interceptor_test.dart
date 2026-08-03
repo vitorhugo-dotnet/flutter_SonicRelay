@@ -47,11 +47,11 @@ class CallbackAdapter implements HttpClientAdapter {
 }
 
 void main() {
-  test('adds a DeviceBearer token to an authenticated request', () async {
+  test('adds a Bearer token to an authenticated request', () async {
     final identity = FakeDeviceIdentitySession(['token-1']);
     final dio = Dio(BaseOptions(baseUrl: 'https://example.test'));
     dio.httpClientAdapter = CallbackAdapter((options) {
-      expect(options.headers['Authorization'], 'DeviceBearer token-1');
+      expect(options.headers['Authorization'], 'Bearer token-1');
       return ResponseBody.fromString('ok', 200);
     });
     dio.interceptors.add(
@@ -68,7 +68,7 @@ void main() {
     final identity = FakeDeviceIdentitySession(['token-1', 'token-2']);
     final replayDio = Dio(BaseOptions(baseUrl: 'https://example.test'));
     replayDio.httpClientAdapter = CallbackAdapter((options) {
-      expect(options.headers['Authorization'], 'DeviceBearer token-2');
+      expect(options.headers['Authorization'], 'Bearer token-2');
       return ResponseBody.fromString('ok', 200);
     });
     final dio = Dio(BaseOptions(baseUrl: 'https://example.test'));
@@ -131,8 +131,8 @@ void main() {
     expect(replayCalls, 0);
     expect(mutationCalls, 2);
     expect(authorizationHeaders, [
-      'DeviceBearer token-1',
-      'DeviceBearer token-2',
+      'Bearer token-1',
+      'Bearer token-2',
     ]);
     expect(identity.forceRefreshes, [false, true, false]);
   });
@@ -167,7 +167,7 @@ void main() {
     final replayDio = Dio(BaseOptions(baseUrl: 'https://example.test'));
     replayDio.httpClientAdapter = CallbackAdapter((options) {
       expect(options.method, 'POST');
-      expect(options.headers['Authorization'], 'DeviceBearer token-2');
+      expect(options.headers['Authorization'], 'Bearer token-2');
       return ResponseBody.fromString('ok', 200);
     });
     final dio = Dio(BaseOptions(baseUrl: 'https://example.test'));
