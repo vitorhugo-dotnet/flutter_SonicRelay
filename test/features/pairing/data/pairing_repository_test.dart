@@ -23,7 +23,7 @@ const pairingJson = <String, Object?>{
 };
 
 void main() {
-  test('complete posts the minimal challenge with DeviceBearer', () async {
+  test('complete posts the minimal challenge with Bearer', () async {
     late RequestOptions captured;
     final api = DioPairingApi(
       _authorizedDio((options) {
@@ -36,7 +36,7 @@ void main() {
 
     expect(captured.method, 'POST');
     expect(captured.path, '/api/pairings/complete');
-    expect(captured.headers['Authorization'], 'DeviceBearer device-token');
+    expect(captured.headers['Authorization'], 'Bearer device-token');
     expect(captured.data, {
       'challengeId': payload.challengeId,
       'code': payload.code,
@@ -45,7 +45,7 @@ void main() {
     expect(pairing.viewerDeviceId, pairingJson['viewerDeviceId']);
   });
 
-  test('list reads the current device pairings with DeviceBearer', () async {
+  test('list reads the current device pairings with Bearer', () async {
     late RequestOptions captured;
     final api = DioPairingApi(
       _authorizedDio((options) {
@@ -61,12 +61,12 @@ void main() {
       captured.path,
       '/api/devices/00000000-0000-0000-0000-000000000030/pairings',
     );
-    expect(captured.headers['Authorization'], 'DeviceBearer device-token');
+    expect(captured.headers['Authorization'], 'Bearer device-token');
     expect(pairings, hasLength(1));
     expect(pairings.single.status, 'active');
   });
 
-  test('revoke deletes the pairing with DeviceBearer', () async {
+  test('revoke deletes the pairing with Bearer', () async {
     late RequestOptions captured;
     final api = DioPairingApi(
       _authorizedDio((options) {
@@ -79,7 +79,7 @@ void main() {
 
     expect(captured.method, 'DELETE');
     expect(captured.path, '/api/pairings/00000000-0000-0000-0000-000000000010');
-    expect(captured.headers['Authorization'], 'DeviceBearer device-token');
+    expect(captured.headers['Authorization'], 'Bearer device-token');
   });
 
   test('complete hides invalid or expired server details', () async {
@@ -148,7 +148,7 @@ Dio _authorizedDio(ResponseBody Function(RequestOptions options) callback) {
   dio.interceptors.add(
     InterceptorsWrapper(
       onRequest: (options, handler) {
-        options.headers['Authorization'] = 'DeviceBearer device-token';
+        options.headers['Authorization'] = 'Bearer device-token';
         handler.next(options);
       },
     ),

@@ -143,17 +143,17 @@ void main() {
 
   tearDown(() => signalingClient.dispose());
 
-  test('connects with only sessionId and DeviceBearer auth', () async {
+  test('connects with only sessionId and Bearer auth', () async {
     await signalingClient.connect(session: session);
     await Future<void>.delayed(Duration.zero);
 
     expect(requestedUris, hasLength(1));
     final uri = requestedUris.single;
     expect(uri.queryParameters, {'sessionId': 'session-1'});
-    expect(requestedHeaders.single['Authorization'], 'DeviceBearer token-abc');
+    expect(requestedHeaders.single['Authorization'], 'Bearer token-abc');
   });
 
-  test('reconnect obtains a fresh DeviceBearer token', () async {
+  test('reconnect obtains a fresh Bearer token', () async {
     await signalingClient.connect(session: session);
     await Future<void>.delayed(Duration.zero);
     identity.token = 'token-2';
@@ -164,8 +164,8 @@ void main() {
     }
 
     expect(requestedHeaders, hasLength(2));
-    expect(requestedHeaders[0]['Authorization'], 'DeviceBearer token-abc');
-    expect(requestedHeaders[1]['Authorization'], 'DeviceBearer token-2');
+    expect(requestedHeaders[0]['Authorization'], 'Bearer token-abc');
+    expect(requestedHeaders[1]['Authorization'], 'Bearer token-2');
     expect(identity.forceRefreshes, [false, true]);
   });
 
@@ -179,7 +179,7 @@ void main() {
     }
 
     expect(identity.forceRefreshes, [false, true]);
-    expect(requestedHeaders.single['Authorization'], 'DeviceBearer token-2');
+    expect(requestedHeaders.single['Authorization'], 'Bearer token-2');
   });
 
   test('leave cancels retry after a transient token failure', () async {

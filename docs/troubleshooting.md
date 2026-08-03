@@ -16,7 +16,7 @@ Phase 3 failure modes for the device-first Flutter viewer.
 Device-authenticated requests use:
 
 ```text
-Authorization: DeviceBearer <device_access_token>
+Authorization: Bearer <device_access_token>
 ```
 
 ## Pairing fails
@@ -63,7 +63,7 @@ Signaling connects with only `sessionId` in the query:
 
 ```text
 GET /ws/signaling?sessionId={sessionId}
-Authorization: DeviceBearer <device_access_token>
+Authorization: Bearer <device_access_token>
 ```
 
 Network and temporary token failures reconnect with exponential backoff. A

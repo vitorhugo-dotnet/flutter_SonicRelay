@@ -48,7 +48,7 @@ Pairing and session join are intentionally distinct:
 - Pairing accepts the exact QR JSON `{challengeId, code}` or the same two manual
   fields. The camera is opened only by the dedicated scanner screen.
 - Session join accepts only `{"code":"ABC123"}`. Device identity comes from
-  `Authorization: DeviceBearer <device_access_token>`; the body has no device
+  `Authorization: Bearer <device_access_token>`; the body has no device
   identifier.
 - An active pairing is required for a new join. Revoking pairing leaves a stream
   that is already active alone.

@@ -31,7 +31,6 @@ void main() {
         r'ws/signaling[^\n]*deviceId',
         caseSensitive: false,
       ),
-      'account bearer scheme': RegExp(r'Authorization:\s*Bearer\b'),
     };
 
     for (final entry in forbidden.entries) {
@@ -48,7 +47,7 @@ void main() {
         .map((path) => File(path).readAsStringSync())
         .join('\n');
 
-    expect(combined, contains('Authorization: DeviceBearer'));
+    expect(combined, contains('Authorization: Bearer'));
     expect(combined, contains('/api/devices/bootstrap'));
     expect(combined, contains('/api/devices/token'));
     expect(combined, contains('/api/pairings/complete'));

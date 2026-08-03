@@ -66,7 +66,7 @@ flutter build apk --release
 The viewer does not use a human account login. On first launch it bootstraps a `flutter_viewer` identity with `POST /api/devices/bootstrap`, stores the returned device id, credential secret, credential version, device type, and platform in secure storage, then exchanges that credential through `POST /api/devices/token`. Authenticated API and WebSocket requests use the resulting short-lived token:
 
 ```text
-Authorization: DeviceBearer <device_access_token>
+Authorization: Bearer <device_access_token>
 ```
 
 Tokens are cached only in memory and refreshed by the shared `DeviceIdentitySession`. A rejected credential is cleared and routes the app back through `/device-setup`; it never falls back to account login or refresh tokens. Resetting the device identity removes the secure credential and requires the viewer to pair again before joining future sessions.
@@ -104,7 +104,7 @@ After a successful `POST /api/sessions/join`, the viewer opens a device-authenti
 
 ```text
 GET /ws/signaling?sessionId={sessionId}
-Authorization: DeviceBearer <device_access_token>
+Authorization: Bearer <device_access_token>
 ```
 
 Every frame is a typed JSON envelope:
