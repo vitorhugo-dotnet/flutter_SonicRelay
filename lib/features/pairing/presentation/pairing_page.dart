@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import 'pairing_view_model.dart';
 import 'qr_scanner_page.dart';
@@ -32,7 +33,16 @@ class _PairingPageState extends ConsumerState<PairingPage> {
     final viewModel = ref.read(pairingViewModelProvider.notifier);
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Pair device')),
+      appBar: AppBar(
+        title: const Text('Pair device'),
+        actions: [
+          IconButton(
+            tooltip: 'Settings',
+            icon: const Icon(Icons.settings_outlined),
+            onPressed: () => context.push('/settings'),
+          ),
+        ],
+      ),
       body: SafeArea(
         child: ListView(
           padding: const EdgeInsets.all(20),

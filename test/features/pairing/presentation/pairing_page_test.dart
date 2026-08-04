@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:go_router/go_router.dart';
 import 'package:sonic_relay/features/pairing/data/pairing_repository.dart';
 import 'package:sonic_relay/features/pairing/domain/device_pairing.dart';
 import 'package:sonic_relay/features/pairing/domain/pairing_challenge_payload.dart';
@@ -114,6 +115,36 @@ void main() {
     expect(repository.revokeCalls, 1);
     expect(repository.revokedPairingId, 'pairing-existing');
     expect(find.text('Publisher publisher-existing'), findsNothing);
+  });
+
+  testWidgets('exposes a settings entry point that opens /settings', (tester) async {
+    final repository = _FakePairingRepository();
+    final router = GoRouter(
+      initialLocation: '/pair',
+      routes: [
+        GoRoute(path: '/pair', builder: (_, _) => const PairingPage()),
+        GoRoute(
+          path: '/settings',
+          builder: (_, _) => const Scaffold(body: Text('Settings page')),
+        ),
+      ],
+    );
+    addTearDown(router.dispose);
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          pairingRepositoryProvider.overrideWithValue(repository),
+          currentPairingDeviceIdProvider.overrideWithValue(() async => null),
+        ],
+        child: MaterialApp.router(routerConfig: router),
+      ),
+    );
+
+    await tester.tap(find.byTooltip('Settings'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Settings page'), findsOneWidget);
   });
 }
 
