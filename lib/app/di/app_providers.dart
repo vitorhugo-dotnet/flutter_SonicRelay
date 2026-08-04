@@ -388,6 +388,10 @@ final webRtcReceiverServiceProvider = Provider<WebRtcReceiverService>((ref) {
     audioReceiver: ref.watch(audioReceiverServiceProvider),
     iceServers: ref.watch(rtcIceServerConfigProvider),
     iceServersResolver: ref.watch(iceServersRepositoryProvider).resolve,
+    // disableFallback needs no explicit handling here: the backend's ICE-servers endpoint
+    // already omits TURN entries entirely when the effective relay mode is disableFallback
+    // (dotnet_SonicRelay's TurnCredentialService), so this client naturally can't fall back
+    // to relay — there's nothing to fall back to.
     forceRelay: () => ref.read(relayModeProvider) == RelayModes.forceRelay,
   );
   ref.onDispose(service.dispose);

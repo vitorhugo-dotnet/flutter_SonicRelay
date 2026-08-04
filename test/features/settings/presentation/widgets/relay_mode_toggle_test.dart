@@ -49,10 +49,10 @@ void main() {
     await tester.tap(find.text('Force relay (TURN only)'));
     await tester.pumpAndSettle();
 
-    final forceRelayTile = tester.widget<RadioListTile<String>>(
-      find.widgetWithText(RadioListTile<String>, 'Force relay (TURN only)'),
+    final radioGroup = tester.widget<RadioGroup<String>>(
+      find.byType(RadioGroup<String>),
     );
-    expect(forceRelayTile.groupValue, RelayModes.forceRelay);
+    expect(radioGroup.groupValue, RelayModes.forceRelay);
     expect(find.byType(SnackBar), findsNothing);
   });
 
@@ -69,10 +69,10 @@ void main() {
       find.text('Could not save the relay mode. Please try again.'),
       findsOneWidget,
     );
-    final automaticTile = tester.widget<RadioListTile<String>>(
-      find.widgetWithText(RadioListTile<String>, 'Automatic'),
+    final radioGroup = tester.widget<RadioGroup<String>>(
+      find.byType(RadioGroup<String>),
     );
-    expect(automaticTile.groupValue, RelayModes.automatic);
+    expect(radioGroup.groupValue, RelayModes.automatic);
   });
 }
 

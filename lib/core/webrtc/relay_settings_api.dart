@@ -34,10 +34,7 @@ class DioRelaySettingsApi implements RelaySettingsApi {
   Future<RelaySettingsResult> update({String? relayMode, List<String>? turnUris}) async {
     final response = await _dio.put<Map<String, Object?>>(
       '/api/settings/relay',
-      data: {
-        if (relayMode != null) 'relayMode': relayMode,
-        if (turnUris != null) 'turnUris': turnUris,
-      },
+      data: {'relayMode': ?relayMode, 'turnUris': ?turnUris},
     );
     return _parse(response.data ?? const {});
   }

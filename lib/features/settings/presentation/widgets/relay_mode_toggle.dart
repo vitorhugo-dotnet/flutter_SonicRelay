@@ -31,40 +31,38 @@ class RelayModeToggle extends ConsumerWidget {
       }
     }
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        RadioListTile<String>(
-          contentPadding: EdgeInsets.zero,
-          value: RelayModes.automatic,
-          groupValue: relayMode,
-          onChanged: select,
-          title: const Text('Automatic'),
-          subtitle: const Text(
-            'Prefer a direct connection; fall back to the relay if it fails.',
+    return RadioGroup<String>(
+      groupValue: relayMode,
+      onChanged: select,
+      child: const Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          RadioListTile<String>(
+            contentPadding: EdgeInsets.zero,
+            value: RelayModes.automatic,
+            title: Text('Automatic'),
+            subtitle: Text(
+              'Prefer a direct connection; fall back to the relay if it fails.',
+            ),
           ),
-        ),
-        RadioListTile<String>(
-          contentPadding: EdgeInsets.zero,
-          value: RelayModes.forceRelay,
-          groupValue: relayMode,
-          onChanged: select,
-          title: const Text('Force relay (TURN only)'),
-          subtitle: const Text(
-            'Always route audio through the relay server. Useful on restrictive networks.',
+          RadioListTile<String>(
+            contentPadding: EdgeInsets.zero,
+            value: RelayModes.forceRelay,
+            title: Text('Force relay (TURN only)'),
+            subtitle: Text(
+              'Always route audio through the relay server. Useful on restrictive networks.',
+            ),
           ),
-        ),
-        RadioListTile<String>(
-          contentPadding: EdgeInsets.zero,
-          value: RelayModes.disableFallback,
-          groupValue: relayMode,
-          onChanged: select,
-          title: const Text('Disable relay fallback'),
-          subtitle: const Text(
-            'Only connect directly; never fall back to the relay if it fails.',
+          RadioListTile<String>(
+            contentPadding: EdgeInsets.zero,
+            value: RelayModes.disableFallback,
+            title: Text('Disable relay fallback'),
+            subtitle: Text(
+              'Only connect directly; never fall back to the relay if it fails.',
+            ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 }

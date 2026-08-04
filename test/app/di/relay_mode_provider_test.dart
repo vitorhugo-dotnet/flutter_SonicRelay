@@ -46,25 +46,36 @@ class _FakeRelaySettingsApi implements RelaySettingsApi {
 }
 
 void main() {
-  test('RelayModeNotifier defaults to automatic and writes through to the server on change', () async {
-    final storage = _FakeRelayModeStorage();
-    final api = _FakeRelaySettingsApi();
-    final container = ProviderContainer(
-      overrides: [
-        relayModeStorageProvider.overrideWithValue(storage),
-        relaySettingsApiProvider.overrideWithValue(api),
-      ],
-    );
-    addTearDown(container.dispose);
+  test(
+    'RelayModeNotifier writes through the server-confirmed value on change, not the requested one',
+    () async {
+      final storage = _FakeRelayModeStorage();
+      // The fake deliberately confirms a *different* mode than the one requested below, so
+      // this test can only pass if the notifier applies `result.relayMode` (the server's
+      // response) rather than the input `mode` directly — proving there's no local-only apply.
+      final api = _FakeRelaySettingsApi()
+        ..updateResult = const RelaySettingsResult(
+          relayMode: RelayModes.disableFallback,
+          turnUris: [],
+          hasCustomTurnSecret: false,
+        );
+      final container = ProviderContainer(
+        overrides: [
+          relayModeStorageProvider.overrideWithValue(storage),
+          relaySettingsApiProvider.overrideWithValue(api),
+        ],
+      );
+      addTearDown(container.dispose);
 
-    expect(container.read(relayModeProvider), RelayModes.automatic);
+      expect(container.read(relayModeProvider), RelayModes.automatic);
 
-    await container.read(relayModeProvider.notifier).set(RelayModes.forceRelay);
+      await container.read(relayModeProvider.notifier).set(RelayModes.forceRelay);
 
-    expect(api.lastUpdateRelayMode, RelayModes.forceRelay);
-    expect(container.read(relayModeProvider), RelayModes.forceRelay);
-    expect(storage.written, RelayModes.forceRelay);
-  });
+      expect(api.lastUpdateRelayMode, RelayModes.forceRelay);
+      expect(container.read(relayModeProvider), RelayModes.disableFallback);
+      expect(storage.written, RelayModes.disableFallback);
+    },
+  );
 
   test('refresh fetches the server value and applies it locally', () async {
     final storage = _FakeRelayModeStorage();
