@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -17,8 +15,20 @@ class RelayModeToggle extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final relayMode = ref.watch(relayModeProvider);
 
-    void select(String? mode) {
-      if (mode != null) unawaited(ref.read(relayModeProvider.notifier).set(mode));
+    Future<void> select(String? mode) async {
+      if (mode == null) return;
+      try {
+        await ref.read(relayModeProvider.notifier).set(mode);
+      } catch (_) {
+        if (!context.mounted) return;
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(
+            const SnackBar(
+              content: Text('Could not save the relay mode. Please try again.'),
+            ),
+          );
+      }
     }
 
     return Column(
