@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sonic_relay/app/di/app_providers.dart';
 import 'package:sonic_relay/app/sonic_relay_app.dart';
+import 'package:sonic_relay/core/webrtc/relay_settings_api.dart';
 import 'package:sonic_relay/features/listener/presentation/listener_page.dart';
 import 'package:sonic_relay/features/sessions/presentation/join_session_page.dart';
 import 'package:sonic_relay/features/settings/presentation/settings_page.dart';
@@ -12,12 +13,34 @@ import 'package:sonic_relay/features/settings/presentation/settings_page.dart';
 String _testDiagnosticsDirectory() =>
     Directory.systemTemp.createTempSync('sonicrelay_app_test_').path;
 
+/// Settings' `CoturnUrlField` (visible once paired, see coturn_url_field.dart) fetches on
+/// mount. Without this override the real `DioRelaySettingsApi` schedules a connect-timeout
+/// timer that outlives the widget tree once these tests move on without awaiting it, tripping
+/// Flutter test's "A Timer is still pending" invariant.
+class _FakeRelaySettingsApi implements RelaySettingsApi {
+  @override
+  Future<RelaySettingsResult> fetch() async => const RelaySettingsResult(
+    relayMode: 'automatic',
+    turnUris: [],
+    hasCustomTurnSecret: false,
+  );
+
+  @override
+  Future<RelaySettingsResult> update({String? relayMode, List<String>? turnUris}) async =>
+      RelaySettingsResult(
+        relayMode: relayMode ?? 'automatic',
+        turnUris: turnUris ?? const [],
+        hasCustomTurnSecret: false,
+      );
+}
+
 ProviderScope testApp() => ProviderScope(
   overrides: [
     deviceReadinessProvider.overrideWith(_ReadyReadinessNotifier.new),
     diagnosticsDirectoryProvider.overrideWithValue(
       _testDiagnosticsDirectory(),
     ),
+    relaySettingsApiProvider.overrideWithValue(_FakeRelaySettingsApi()),
   ],
   child: const SonicRelayApp(),
 );
@@ -64,6 +87,7 @@ void main() {
             diagnosticsDirectoryProvider.overrideWithValue(
               diagnosticsDirectory,
             ),
+            relaySettingsApiProvider.overrideWithValue(_FakeRelaySettingsApi()),
           ],
           child: MaterialApp(
             theme: ThemeData.dark(useMaterial3: true),

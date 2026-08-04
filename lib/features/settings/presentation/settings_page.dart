@@ -8,6 +8,7 @@ import '../../../app/theme/app_colors.dart';
 import '../../../app/theme/app_spacing.dart';
 import '../../../core/widgets/sonic_button.dart';
 import '../../../core/widgets/sonic_card.dart';
+import 'widgets/coturn_url_field.dart';
 import 'widgets/keep_playing_toggle.dart';
 import 'widgets/relay_mode_toggle.dart';
 import 'widgets/server_url_field.dart';
@@ -76,6 +77,27 @@ class SettingsPage extends ConsumerWidget {
                           icon: Icons.dark_mode_outlined,
                           title: 'Appearance',
                           subtitle: 'Dark theme',
+                        ),
+                        Consumer(
+                          builder: (context, ref, _) {
+                            final isPaired =
+                                ref.watch(deviceReadinessProvider).status ==
+                                DeviceReadinessStatus.ready;
+                            if (!isPaired) return const SizedBox.shrink();
+                            return const Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                Divider(height: AppSpacing.xl),
+                                _SettingsRow(
+                                  icon: Icons.dns_outlined,
+                                  title: 'Coturn',
+                                  subtitle: 'TURN server this backend hands out',
+                                ),
+                                SizedBox(height: AppSpacing.sm),
+                                CoturnUrlField(),
+                              ],
+                            );
+                          },
                         ),
                       ],
                     ),
