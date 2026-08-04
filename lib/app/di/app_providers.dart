@@ -10,6 +10,8 @@ import '../../core/http/dio_client.dart';
 import '../../core/storage/background_playback_storage.dart';
 import '../../core/storage/relay_mode_storage.dart';
 import '../../core/storage/server_config_storage.dart';
+import '../../core/webrtc/relay_modes.dart';
+import '../../core/webrtc/relay_settings_api.dart';
 import '../../features/background/data/foreground_stream_service.dart';
 import '../../features/background/presentation/stream_lifecycle_controller.dart';
 import '../../features/listener/presentation/listener_view_model.dart';
@@ -86,23 +88,35 @@ final relayModeStorageProvider = Provider<RelayModeStorage>(
   (ref) => RelayModeStorage(ref.watch(secureStorageProvider)),
 );
 
-/// Whether ICE is forced to relay-only (TURN). User-controlled and persisted;
-/// applied to the next WebRTC negotiation.
-final forceRelayProvider = NotifierProvider<ForceRelayNotifier, bool>(
-  ForceRelayNotifier.new,
+final relaySettingsApiProvider = Provider<RelaySettingsApi>(
+  (ref) => DioRelaySettingsApi(ref.watch(dioProvider)),
 );
 
-class ForceRelayNotifier extends Notifier<bool> {
-  ForceRelayNotifier([this._initial = false]);
+/// The server-synced relay policy (issue #26 follow-up). Local storage is a last-known-good
+/// cache only — [set] and [refresh] both write through the confirmed server value, never a
+/// locally-chosen one, so every device converges on the backend's single global setting.
+final relayModeProvider = NotifierProvider<RelayModeNotifier, String>(
+  RelayModeNotifier.new,
+);
 
-  final bool _initial;
+class RelayModeNotifier extends Notifier<String> {
+  RelayModeNotifier([this._initial = RelayModes.automatic]);
+
+  final String _initial;
 
   @override
-  bool build() => _initial;
+  String build() => _initial;
 
-  Future<void> set(bool value) async {
-    await ref.read(relayModeStorageProvider).write(value);
-    state = value;
+  Future<void> set(String mode) async {
+    final result = await ref.read(relaySettingsApiProvider).update(relayMode: mode);
+    await ref.read(relayModeStorageProvider).write(result.relayMode);
+    state = result.relayMode;
+  }
+
+  Future<void> refresh() async {
+    final result = await ref.read(relaySettingsApiProvider).fetch();
+    await ref.read(relayModeStorageProvider).write(result.relayMode);
+    state = result.relayMode;
   }
 }
 
@@ -374,7 +388,7 @@ final webRtcReceiverServiceProvider = Provider<WebRtcReceiverService>((ref) {
     audioReceiver: ref.watch(audioReceiverServiceProvider),
     iceServers: ref.watch(rtcIceServerConfigProvider),
     iceServersResolver: ref.watch(iceServersRepositoryProvider).resolve,
-    forceRelay: () => ref.read(forceRelayProvider),
+    forceRelay: () => ref.read(relayModeProvider) == RelayModes.forceRelay,
   );
   ref.onDispose(service.dispose);
   return service;
