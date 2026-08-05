@@ -78,6 +78,26 @@ void main() {
     );
     expect(paths, isNot(contains('/login')));
   });
+
+  test('unpaired device can still reach settings', () {
+    expect(
+      deviceIdentityRedirect(
+        const DeviceReadinessState.pairingRequired(),
+        '/settings',
+      ),
+      isNull,
+    );
+  });
+
+  test('unpaired device is still redirected away from other pages', () {
+    expect(
+      deviceIdentityRedirect(
+        const DeviceReadinessState.pairingRequired(),
+        '/listener',
+      ),
+      '/pair',
+    );
+  });
 }
 
 class _ReadyReadinessNotifier extends DeviceReadinessNotifier {

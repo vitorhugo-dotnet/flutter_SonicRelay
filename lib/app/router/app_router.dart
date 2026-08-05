@@ -20,7 +20,12 @@ String? deviceIdentityRedirect(
     case DeviceReadinessStatus.deviceSetup:
       return location == '/device-setup' ? null : '/device-setup';
     case DeviceReadinessStatus.pairingRequired:
-      return location == '/pair' ? null : '/pair';
+      // Settings must stay reachable here: it holds the server URL field, and a device
+      // pointed at the wrong backend can never pair, so redirecting Settings back to /pair
+      // left no way to fix it from inside the app. The restoring/deviceSetup branches are
+      // deliberately unchanged — before a device credential exists there is no authenticated
+      // client for Settings to talk to, and _DeviceSetupPage already owns that retry path.
+      return location == '/pair' || location == '/settings' ? null : '/pair';
     case DeviceReadinessStatus.ready:
       if (location == '/loading' || location == '/device-setup') {
         return '/join';
