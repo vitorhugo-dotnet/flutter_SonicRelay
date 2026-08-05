@@ -214,11 +214,21 @@ the pattern and the normaliser:
 ```
 
 In `lib/features/sessions/presentation/widgets/session_code_input.dart`, cap
-the length and fix the misleading hint:
+the length and fix the misleading hint.
+
+The formatter must strip separators, not just upper-case. Flutter appends its
+`LengthLimitingTextInputFormatter` AFTER the widget's own `inputFormatters`
+(`packages/flutter/lib/src/material/text_field.dart:229-230, 1553-1556`), so a
+`maxLength` of 6 truncates the RAW text before `onChanged` fires. With
+stripping done only in `updateCode`, a pasted `SR-4F8K` is truncated to
+`SR-4F8` first and then stripped to `SR4F8` — five characters, rejected. That
+reintroduces the very bug this task exists to fix. Replacing
+`_UpperCaseTextFormatter` with one that upper-cases AND drops anything outside
+`[A-Z0-9]` makes the length limiter measure already-clean text:
 
 ```dart
       maxLength: 6,
-      inputFormatters: [_UpperCaseTextFormatter()],
+      inputFormatters: [_SessionCodeFormatter()],
       onChanged: onChanged,
       decoration: InputDecoration(
         labelText: 'Session code',
@@ -261,6 +271,12 @@ check, which would otherwise swallow it:
     }
     if (status == 401 || status == 403) {
 ```
+
+Keep the stripping in `updateCode` as well — the view model is called directly
+by tests and must not assume the widget already sanitised its input. Add a
+widget-level test driving the real pipeline: enter `SR-4F8K` into
+`SessionCodeInput` and assert `onChanged` receives `SR4F8K`. Every other test
+bypasses that seam.
 
 In `join_session_view_model.dart`, `notPaired` must not be retryable — retrying
 cannot fix it — so leave it out of the `retryable` expression, which already
