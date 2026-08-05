@@ -123,4 +123,28 @@ void main() {
     expect(state.canRetry, isTrue);
     expect(state.errorMessage, contains('Retry'));
   });
+
+  test('normalises separators and casing into a six-character code', () {
+    final container = ProviderContainer();
+    addTearDown(container.dispose);
+    final viewModel = container.read(joinSessionViewModelProvider.notifier);
+
+    viewModel.updateCode(' sr-4f8k ');
+
+    expect(container.read(joinSessionViewModelProvider).code, 'SR4F8K');
+  });
+
+  test('rejects a code that is not exactly six characters', () async {
+    final container = ProviderContainer();
+    addTearDown(container.dispose);
+    final viewModel = container.read(joinSessionViewModelProvider.notifier);
+
+    viewModel.updateCode('ABC');
+    await viewModel.join();
+
+    expect(
+      container.read(joinSessionViewModelProvider).validationMessage,
+      isNotNull,
+    );
+  });
 }

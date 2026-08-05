@@ -11,6 +11,7 @@ enum SessionsFailureKind {
   invalidCode,
   expiredCode,
   maxViewers,
+  notPaired,
   unauthorized,
   manualRetry,
   network,
@@ -66,6 +67,13 @@ class SessionsRepository {
         ? '${data['code'] ?? ''} ${data['message'] ?? ''}'.toLowerCase()
         : data.toString().toLowerCase();
 
+    if (status == 403 && text.contains('not_paired')) {
+      return const SessionsFailure(
+        SessionsFailureKind.notPaired,
+        'This device is no longer paired with that publisher. Pair again from the '
+        'pairing screen, then retry.',
+      );
+    }
     if (status == 401 || status == 403) {
       return const SessionsFailure(
         SessionsFailureKind.unauthorized,

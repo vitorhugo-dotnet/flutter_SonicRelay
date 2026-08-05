@@ -16,13 +16,13 @@ void main() {
       ),
     );
 
-    await tester.enterText(find.byType(TextField), 'sr-4f8k');
+    await tester.enterText(find.byType(TextField), 'fe237f');
 
     expect(
       tester.widget<EditableText>(find.byType(EditableText)).controller.text,
-      'SR-4F8K',
+      'FE237F',
     );
     expect(find.text('Check this code.'), findsOneWidget);
-    expect(changed, 'SR-4F8K');
+    expect(changed, 'FE237F');
   });
 }

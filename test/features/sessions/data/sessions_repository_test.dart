@@ -114,4 +114,19 @@ void main() {
       );
     });
   }
+
+  test('maps 403 not_paired to a pairing failure, not an invalid code', () async {
+    api.error = dioFailure(403, 'not_paired');
+
+    await expectLater(
+      repository.join('FE237F'),
+      throwsA(
+        isA<SessionsFailure>().having(
+          (failure) => failure.kind,
+          'kind',
+          SessionsFailureKind.notPaired,
+        ),
+      ),
+    );
+  });
 }

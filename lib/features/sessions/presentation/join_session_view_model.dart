@@ -33,7 +33,10 @@ final joinSessionViewModelProvider =
     );
 
 class JoinSessionViewModel extends Notifier<JoinSessionState> {
-  static final _validCode = RegExp(r'^[A-Z0-9-]{4,12}$');
+  // Exactly what the backend accepts (SessionEndpoints.JoinAsync): six ASCII alphanumerics.
+  // The old 4-12 pattern with hyphens let codes through that the server always rejected,
+  // which surfaced to the user as a useless "invalid code".
+  static final _validCode = RegExp(r'^[A-Z0-9]{6}$');
   late final SessionsRepository _repository;
 
   @override
@@ -43,7 +46,11 @@ class JoinSessionViewModel extends Notifier<JoinSessionState> {
   }
 
   void updateCode(String value) {
-    state = JoinSessionState(code: value.trim().toUpperCase());
+    // Strip whitespace and hyphens anywhere in the string, not just at the ends, so a code
+    // that was pasted or read aloud with separators still normalises to what the server wants.
+    state = JoinSessionState(
+      code: value.replaceAll(RegExp(r'[\s-]'), '').toUpperCase(),
+    );
   }
 
   Future<void> join() async {
