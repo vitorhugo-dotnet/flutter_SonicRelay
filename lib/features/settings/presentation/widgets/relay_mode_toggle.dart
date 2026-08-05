@@ -6,8 +6,8 @@ import '../../../../core/webrtc/relay_modes.dart';
 
 /// Lets the viewer choose how ICE connects — automatic (direct with relay fallback), forced
 /// relay-only, or relay disabled entirely — instead of the old force-relay-only toggle. The
-/// choice is server-synced (windows_SonicRelay/dotnet_SonicRelay design spec, 2026-08-04) so
-/// changing it here also applies on every other paired device.
+/// choice is a local, per-device preference (see [relayModeProvider]); it does not affect any
+/// other device.
 class RelayModeToggle extends ConsumerWidget {
   const RelayModeToggle({super.key});
 

@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -90,7 +88,7 @@ class SettingsPage extends ConsumerWidget {
                                 const CoturnUrlField(),
                                 const SizedBox(height: AppSpacing.sm),
                                 Text(
-                                  'Applies to every device paired with this backend.',
+                                  'Applies to this device only.',
                                   style: Theme.of(context).textTheme.bodySmall,
                                 ),
                               ],
@@ -169,37 +167,12 @@ class SettingsPage extends ConsumerWidget {
   }
 }
 
-/// The relay-mode radio group, plus a background refresh of the server-confirmed value on
-/// mount. Local storage (`relayModeStorageProvider`) is only a last-known-good cache — without
-/// this refresh, a relay-mode change made from another paired device (or the Windows
-/// Publisher) would never reach this device's Settings screen until the user happened to
-/// re-select a mode here, silently drifting from the server's single global setting.
-class _ConnectionSection extends ConsumerStatefulWidget {
+/// The relay-mode radio group. Local by design — see [relayModeProvider].
+class _ConnectionSection extends ConsumerWidget {
   const _ConnectionSection();
 
   @override
-  ConsumerState<_ConnectionSection> createState() => _ConnectionSectionState();
-}
-
-class _ConnectionSectionState extends ConsumerState<_ConnectionSection> {
-  @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) unawaited(_refreshRelayMode());
-    });
-  }
-
-  Future<void> _refreshRelayMode() async {
-    try {
-      await ref.read(relayModeProvider.notifier).refresh();
-    } catch (_) {
-      // Best-effort background sync; keep the last-known-good local value on failure.
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -215,7 +188,7 @@ class _ConnectionSectionState extends ConsumerState<_ConnectionSection> {
         ),
         const SizedBox(height: AppSpacing.sm),
         Text(
-          'Applies to every device paired with this backend.',
+          'Applies to this device only.',
           style: Theme.of(context).textTheme.bodySmall,
         ),
       ],

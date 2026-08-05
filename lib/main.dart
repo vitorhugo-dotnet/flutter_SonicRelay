@@ -7,6 +7,7 @@ import 'app/di/app_providers.dart';
 import 'app/env/app_config.dart';
 import 'app/sonic_relay_app.dart';
 import 'core/storage/background_playback_storage.dart';
+import 'core/storage/coturn_override_storage.dart';
 import 'core/storage/relay_mode_storage.dart';
 import 'core/storage/server_config_storage.dart';
 
@@ -18,6 +19,9 @@ Future<void> main() async {
       await const ServerConfigStorage(secureStorage).read() ??
       AppConfig.defaultServerUrl;
   final savedRelayMode = await const RelayModeStorage(secureStorage).read();
+  final savedCoturnOverride = await const CoturnOverrideStorage(
+    secureStorage,
+  ).read();
   final savedKeepPlaying =
       await const BackgroundPlaybackStorage(secureStorage).read();
   final diagnosticsDirectory = (await getApplicationSupportDirectory()).path;
@@ -27,6 +31,9 @@ Future<void> main() async {
       overrides: [
         serverUrlProvider.overrideWith(() => ServerUrlNotifier(savedServerUrl)),
         relayModeProvider.overrideWith(() => RelayModeNotifier(savedRelayMode)),
+        coturnOverrideProvider.overrideWith(
+          () => CoturnOverrideNotifier(savedCoturnOverride),
+        ),
         backgroundPlaybackEnabledProvider.overrideWith(
           () => BackgroundPlaybackNotifier(savedKeepPlaying),
         ),

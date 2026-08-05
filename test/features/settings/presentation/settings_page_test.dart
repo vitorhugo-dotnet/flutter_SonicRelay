@@ -7,25 +7,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:sonic_relay/app/di/app_providers.dart';
 import 'package:sonic_relay/core/storage/relay_mode_storage.dart';
 import 'package:sonic_relay/core/webrtc/relay_modes.dart';
-import 'package:sonic_relay/core/webrtc/relay_settings_api.dart';
 import 'package:sonic_relay/features/settings/presentation/settings_page.dart';
-
-class _FakeRelaySettingsApi implements RelaySettingsApi {
-  @override
-  Future<RelaySettingsResult> fetch() async => const RelaySettingsResult(
-    relayMode: RelayModes.automatic,
-    turnUris: [],
-    hasCustomTurnSecret: false,
-  );
-
-  @override
-  Future<RelaySettingsResult> update({String? relayMode, List<String>? turnUris}) async =>
-      RelaySettingsResult(
-        relayMode: relayMode ?? RelayModes.automatic,
-        turnUris: turnUris ?? const [],
-        hasCustomTurnSecret: false,
-      );
-}
 
 class _FakeRelayModeStorage extends RelayModeStorage {
   _FakeRelayModeStorage() : super(const FlutterSecureStorage());
@@ -60,7 +42,6 @@ Future<void> _pumpSettings(
         diagnosticsDirectoryProvider.overrideWithValue(
           Directory.systemTemp.createTempSync('sonicrelay_settings_test_').path,
         ),
-        relaySettingsApiProvider.overrideWithValue(_FakeRelaySettingsApi()),
         relayModeStorageProvider.overrideWithValue(_FakeRelayModeStorage()),
       ],
       child: const MaterialApp(home: SettingsPage()),

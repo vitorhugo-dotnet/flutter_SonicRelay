@@ -11,9 +11,10 @@ import '../../../../core/widgets/sonic_text_field.dart';
 /// check (scheme + non-empty host) rather than a full TURN URI grammar validator.
 final _turnUrlPattern = RegExp(r'^turns?:[^\s:]+');
 
-/// Lets the user view and change the coturn (TURN) server URL the backend hands out to every
-/// paired device (design spec 2026-08-04). Unlike the API server URL, this is a server-side
-/// override, not a local setting — saving calls PUT /api/settings/relay directly.
+/// Lets the user set a local override for the coturn (TURN) server URL, replacing the one the
+/// backend hands out for this device only. Unlike the API server URL, the field starts blank
+/// and is never pre-filled with the backend's value — the deployment's relay host is not
+/// disclosed through this UI, and blank means "use whatever the server sends".
 class CoturnUrlField extends ConsumerStatefulWidget {
   const CoturnUrlField({super.key});
 
@@ -24,43 +25,17 @@ class CoturnUrlField extends ConsumerStatefulWidget {
 class _CoturnUrlFieldState extends ConsumerState<CoturnUrlField> {
   final _controller = TextEditingController();
   String? _error;
-  bool _loaded = false;
-  bool _loadFailed = false;
 
   @override
   void initState() {
     super.initState();
-    _load();
+    _controller.text = ref.read(coturnOverrideProvider) ?? '';
   }
 
   @override
   void dispose() {
     _controller.dispose();
     super.dispose();
-  }
-
-  Future<void> _load() async {
-    setState(() {
-      _loaded = false;
-      _loadFailed = false;
-    });
-    try {
-      final result = await ref.read(relaySettingsApiProvider).fetch();
-      if (!mounted) return;
-      setState(() {
-        _controller.text = result.turnUris.isEmpty ? '' : result.turnUris.first;
-        _loaded = true;
-      });
-    } catch (_) {
-      if (!mounted) return;
-      // Distinct from "loaded, and the override happens to be empty" — an empty field here
-      // would otherwise look identical to a legitimately-unset override, and a user tapping
-      // Save without noticing the load failed would clear the TURN override for every device.
-      setState(() {
-        _loaded = true;
-        _loadFailed = true;
-      });
-    }
   }
 
   bool _isValid(String url) => _turnUrlPattern.hasMatch(url);
@@ -73,38 +48,18 @@ class _CoturnUrlFieldState extends ConsumerState<CoturnUrlField> {
       });
       return;
     }
-    try {
-      await ref.read(relaySettingsApiProvider).update(
-        turnUris: url.isEmpty ? const [] : [url],
+    await ref.read(coturnOverrideProvider.notifier).set(url);
+    if (!mounted) return;
+    setState(() => _error = null);
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(content: Text(url.isEmpty ? 'Using the server relay.' : 'Coturn URL saved.')),
       );
-      if (!mounted) return;
-      setState(() => _error = null);
-      ScaffoldMessenger.of(context)
-        ..hideCurrentSnackBar()
-        ..showSnackBar(const SnackBar(content: Text('Coturn URL saved.')));
-    } catch (_) {
-      if (!mounted) return;
-      setState(() => _error = 'Could not save the coturn URL. Please try again.');
-    }
   }
 
   @override
   Widget build(BuildContext context) {
-    if (!_loaded) return const SizedBox.shrink();
-    if (_loadFailed) {
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          const SizedBox(height: AppSpacing.sm),
-          Text(
-            'Could not load the current coturn URL.',
-            style: TextStyle(color: Theme.of(context).colorScheme.error),
-          ),
-          const SizedBox(height: AppSpacing.md),
-          SonicButton(label: 'Retry', icon: Icons.refresh_outlined, onPressed: _load),
-        ],
-      );
-    }
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
