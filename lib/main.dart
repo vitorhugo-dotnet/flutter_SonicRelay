@@ -17,7 +17,7 @@ Future<void> main() async {
   final savedServerUrl =
       await const ServerConfigStorage(secureStorage).read() ??
       AppConfig.defaultServerUrl;
-  final savedForceRelay = await const RelayModeStorage(secureStorage).read();
+  final savedRelayMode = await const RelayModeStorage(secureStorage).read();
   final savedKeepPlaying =
       await const BackgroundPlaybackStorage(secureStorage).read();
   final diagnosticsDirectory = (await getApplicationSupportDirectory()).path;
@@ -26,7 +26,7 @@ Future<void> main() async {
     ProviderScope(
       overrides: [
         serverUrlProvider.overrideWith(() => ServerUrlNotifier(savedServerUrl)),
-        forceRelayProvider.overrideWith(() => ForceRelayNotifier(savedForceRelay)),
+        relayModeProvider.overrideWith(() => RelayModeNotifier(savedRelayMode)),
         backgroundPlaybackEnabledProvider.overrideWith(
           () => BackgroundPlaybackNotifier(savedKeepPlaying),
         ),

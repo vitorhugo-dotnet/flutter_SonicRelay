@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -8,6 +10,7 @@ import '../../../app/theme/app_colors.dart';
 import '../../../app/theme/app_spacing.dart';
 import '../../../core/widgets/sonic_button.dart';
 import '../../../core/widgets/sonic_card.dart';
+import 'widgets/coturn_url_field.dart';
 import 'widgets/keep_playing_toggle.dart';
 import 'widgets/relay_mode_toggle.dart';
 import 'widgets/server_url_field.dart';
@@ -50,16 +53,7 @@ class SettingsPage extends ConsumerWidget {
                         const SizedBox(height: AppSpacing.md),
                         const ServerUrlField(),
                         const Divider(height: AppSpacing.xl),
-                        const _SettingsRow(
-                          icon: Icons.hub_outlined,
-                          title: 'Connection',
-                          subtitle: 'ICE transport',
-                        ),
-                        const SizedBox(height: AppSpacing.sm),
-                        const Material(
-                          color: Colors.transparent,
-                          child: RelayModeToggle(),
-                        ),
+                        const _ConnectionSection(),
                         const Divider(height: AppSpacing.xl),
                         const _SettingsRow(
                           icon: Icons.headset_outlined,
@@ -76,6 +70,32 @@ class SettingsPage extends ConsumerWidget {
                           icon: Icons.dark_mode_outlined,
                           title: 'Appearance',
                           subtitle: 'Dark theme',
+                        ),
+                        Consumer(
+                          builder: (context, ref, _) {
+                            final isPaired =
+                                ref.watch(deviceReadinessProvider).status ==
+                                DeviceReadinessStatus.ready;
+                            if (!isPaired) return const SizedBox.shrink();
+                            return Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                const Divider(height: AppSpacing.xl),
+                                const _SettingsRow(
+                                  icon: Icons.dns_outlined,
+                                  title: 'Coturn',
+                                  subtitle: 'TURN server this backend hands out',
+                                ),
+                                const SizedBox(height: AppSpacing.sm),
+                                const CoturnUrlField(),
+                                const SizedBox(height: AppSpacing.sm),
+                                Text(
+                                  'Applies to every device paired with this backend.',
+                                  style: Theme.of(context).textTheme.bodySmall,
+                                ),
+                              ],
+                            );
+                          },
                         ),
                       ],
                     ),
@@ -146,6 +166,60 @@ class SettingsPage extends ConsumerWidget {
     if (confirmed == true) {
       await ref.read(deviceReadinessProvider.notifier).resetAndInitialize();
     }
+  }
+}
+
+/// The relay-mode radio group, plus a background refresh of the server-confirmed value on
+/// mount. Local storage (`relayModeStorageProvider`) is only a last-known-good cache — without
+/// this refresh, a relay-mode change made from another paired device (or the Windows
+/// Publisher) would never reach this device's Settings screen until the user happened to
+/// re-select a mode here, silently drifting from the server's single global setting.
+class _ConnectionSection extends ConsumerStatefulWidget {
+  const _ConnectionSection();
+
+  @override
+  ConsumerState<_ConnectionSection> createState() => _ConnectionSectionState();
+}
+
+class _ConnectionSectionState extends ConsumerState<_ConnectionSection> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) unawaited(_refreshRelayMode());
+    });
+  }
+
+  Future<void> _refreshRelayMode() async {
+    try {
+      await ref.read(relayModeProvider.notifier).refresh();
+    } catch (_) {
+      // Best-effort background sync; keep the last-known-good local value on failure.
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const _SettingsRow(
+          icon: Icons.hub_outlined,
+          title: 'Connection',
+          subtitle: 'ICE transport',
+        ),
+        const SizedBox(height: AppSpacing.sm),
+        const Material(
+          color: Colors.transparent,
+          child: RelayModeToggle(),
+        ),
+        const SizedBox(height: AppSpacing.sm),
+        Text(
+          'Applies to every device paired with this backend.',
+          style: Theme.of(context).textTheme.bodySmall,
+        ),
+      ],
+    );
   }
 }
 
