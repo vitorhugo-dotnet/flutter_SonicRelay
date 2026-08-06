@@ -2,12 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../app/di/app_providers.dart';
 import '../../../app/theme/app_colors.dart';
 import '../../../app/theme/app_spacing.dart';
 import '../../../core/widgets/connection_badge.dart';
 import '../../../core/widgets/sonic_button.dart';
 import '../../../core/widgets/sonic_card.dart';
 import 'join_session_view_model.dart';
+import 'widgets/discovered_sessions_list.dart';
 import 'widgets/session_code_input.dart';
 import 'widgets/session_status_card.dart';
 
@@ -17,6 +19,12 @@ class JoinSessionPage extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final state = ref.watch(joinSessionViewModelProvider);
+    // Watched here (not just inside DiscoveredSessionsList) so the list is absent from the
+    // tree entirely when there is nothing to show, rather than present-but-empty — an idle
+    // publisher is the normal case and should add no noise to the manual-entry flow.
+    final hasDiscoveredSessions =
+        (ref.watch(discoverableSessionsProvider).value ?? const [])
+            .isNotEmpty;
     ref.listen(joinSessionViewModelProvider, (previous, next) {
       if (previous?.status != JoinSessionStatus.joined &&
           next.status == JoinSessionStatus.joined) {
@@ -103,6 +111,10 @@ class JoinSessionPage extends ConsumerWidget {
                       ],
                     ),
                   ),
+                  if (hasDiscoveredSessions) ...[
+                    const SizedBox(height: AppSpacing.md),
+                    const DiscoveredSessionsList(),
+                  ],
                   if (state.errorMessage case final message?) ...[
                     const SizedBox(height: AppSpacing.md),
                     SessionStatusCard(

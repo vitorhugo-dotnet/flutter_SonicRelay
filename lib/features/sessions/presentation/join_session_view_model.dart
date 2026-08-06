@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../app/di/app_providers.dart';
+import '../data/dto/discoverable_session.dart';
 import '../data/sessions_repository.dart';
 import '../domain/stream_session.dart';
 
@@ -100,4 +101,23 @@ class JoinSessionViewModel extends Notifier<JoinSessionState> {
   }
 
   Future<void> retry() => join();
+
+  Future<void> joinDiscovered(DiscoverableSession session) async {
+    state = JoinSessionState(code: state.code, status: JoinSessionStatus.joining);
+    try {
+      final joined = await _repository.joinById(session.sessionId);
+      state = JoinSessionState(
+        code: state.code,
+        status: JoinSessionStatus.joined,
+        session: joined,
+      );
+    } on SessionsFailure catch (error) {
+      state = JoinSessionState(
+        code: state.code,
+        status: JoinSessionStatus.failed,
+        errorMessage: error.message,
+        retryable: error.kind == SessionsFailureKind.network,
+      );
+    }
+  }
 }

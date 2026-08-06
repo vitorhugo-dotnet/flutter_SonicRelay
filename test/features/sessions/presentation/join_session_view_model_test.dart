@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sonic_relay/app/di/app_providers.dart';
+import 'package:sonic_relay/features/sessions/data/dto/discoverable_session.dart';
 import 'package:sonic_relay/features/sessions/data/sessions_repository.dart';
 import 'package:sonic_relay/features/sessions/domain/stream_session.dart';
 import 'package:sonic_relay/features/sessions/presentation/join_session_view_model.dart';
@@ -12,6 +13,7 @@ final joinedSession = StreamSession(
 
 class FakeSessionsRepository implements SessionsRepository {
   String? joinedCode;
+  String? joinedSessionId;
   SessionsFailure? failure;
 
   @override
@@ -20,6 +22,16 @@ class FakeSessionsRepository implements SessionsRepository {
   @override
   Future<StreamSession> join(String code) async {
     joinedCode = code;
+    if (failure case final value?) throw value;
+    return joinedSession;
+  }
+
+  @override
+  Future<List<DiscoverableSession>> discover() async => const [];
+
+  @override
+  Future<StreamSession> joinById(String sessionId) async {
+    joinedSessionId = sessionId;
     if (failure case final value?) throw value;
     return joinedSession;
   }

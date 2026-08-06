@@ -36,6 +36,9 @@ ProviderScope testApp() => ProviderScope(
       _testDiagnosticsDirectory(),
     ),
     relayModeStorageProvider.overrideWithValue(_FakeRelayModeStorage()),
+    // Avoids a real Dio call (and its dangling timer) when the join page mounts and watches
+    // this provider eagerly.
+    discoverableSessionsProvider.overrideWith((ref) => Stream.value(const [])),
   ],
   child: const SonicRelayApp(),
 );
@@ -83,6 +86,9 @@ void main() {
               diagnosticsDirectory,
             ),
             relayModeStorageProvider.overrideWithValue(_FakeRelayModeStorage()),
+            discoverableSessionsProvider.overrideWith(
+              (ref) => Stream.value(const []),
+            ),
           ],
           child: MaterialApp(
             theme: ThemeData.dark(useMaterial3: true),

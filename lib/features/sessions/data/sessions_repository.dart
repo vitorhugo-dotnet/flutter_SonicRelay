@@ -3,6 +3,7 @@ import 'package:dio/dio.dart';
 import '../../../app/env/app_config.dart';
 import '../../../core/http/manual_retry_required_exception.dart';
 import '../domain/stream_session.dart';
+import 'dto/discoverable_session.dart';
 import 'dto/join_session_request.dart';
 import 'sessions_api.dart';
 
@@ -54,6 +55,32 @@ class SessionsRepository {
     }
   }
 
+  /// Best-effort: discovery is an accelerator on top of manual code entry, so a failure
+  /// returns an empty list rather than surfacing an error over a code field that still works.
+  Future<List<DiscoverableSession>> discover() async {
+    try {
+      return await _api.discover();
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  Future<StreamSession> joinById(String sessionId) async {
+    try {
+      final response = await _api.joinById(sessionId);
+      final session = response.toDomain(_config.signalingUri);
+      _currentSession = session;
+      return session;
+    } on DioException catch (error) {
+      throw _mapDioFailure(error);
+    } on FormatException {
+      throw const SessionsFailure(
+        SessionsFailureKind.invalidResponse,
+        'The server returned invalid session data. Please retry.',
+      );
+    }
+  }
+
   SessionsFailure _mapDioFailure(DioException error) {
     if (error.error is ManualRetryRequiredException) {
       return const SessionsFailure(
@@ -67,7 +94,7 @@ class SessionsRepository {
         ? '${data['code'] ?? ''} ${data['message'] ?? ''}'.toLowerCase()
         : data.toString().toLowerCase();
 
-    if (status == 403 && text.contains('not_paired')) {
+    if (status == 403 && data is Map && data['code'] == 'not_paired') {
       return const SessionsFailure(
         SessionsFailureKind.notPaired,
         'This device is no longer paired with that publisher. Pair again from the '

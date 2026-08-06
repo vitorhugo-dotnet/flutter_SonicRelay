@@ -26,6 +26,7 @@ import '../../features/device_identity/data/device_identity_session.dart';
 import '../../features/pairing/data/pairing_api.dart';
 import '../../features/pairing/data/pairing_repository.dart';
 import '../../features/pairing/domain/device_pairing.dart';
+import '../../features/sessions/data/dto/discoverable_session.dart';
 import '../../features/sessions/data/sessions_api.dart';
 import '../../features/sessions/data/sessions_repository.dart';
 import '../../features/listener/data/audio_receiver_service.dart';
@@ -362,6 +363,18 @@ final sessionsRepositoryProvider = Provider<SessionsRepository>(
     config: ref.watch(appConfigProvider),
   ),
 );
+
+/// Polls for sessions of paired publishers while the join page is mounted. `autoDispose` so
+/// the poll stops with the page, and a short period because the publisher can start a session
+/// at any moment and this is the only signal the viewer gets.
+final discoverableSessionsProvider =
+    StreamProvider.autoDispose<List<DiscoverableSession>>((ref) async* {
+  final repository = ref.watch(sessionsRepositoryProvider);
+  while (true) {
+    yield await repository.discover();
+    await Future<void>.delayed(const Duration(seconds: 5));
+  }
+});
 
 final webSocketClientProvider = Provider<WebSocketClient>(
   (ref) => WebSocketClient(
