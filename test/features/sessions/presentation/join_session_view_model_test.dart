@@ -11,6 +11,14 @@ final joinedSession = StreamSession(
   signalingUrl: Uri.parse('wss://stream.example/ws/signaling'),
 );
 
+const discoveredSession = DiscoverableSession(
+  sessionId: 'session-42',
+  publisherDeviceName: 'VITOR-DESKTOP',
+  status: 'waiting',
+  viewerCount: 0,
+  maxViewers: 3,
+);
+
 class FakeSessionsRepository implements SessionsRepository {
   String? joinedCode;
   String? joinedSessionId;
@@ -159,4 +167,65 @@ void main() {
       isNotNull,
     );
   });
+
+  test('joinDiscovered success exposes the joined session', () async {
+    final repository = FakeSessionsRepository();
+    final container = createContainer(repository);
+    addTearDown(container.dispose);
+    final viewModel = container.read(joinSessionViewModelProvider.notifier);
+
+    await viewModel.joinDiscovered(discoveredSession);
+
+    final state = container.read(joinSessionViewModelProvider);
+    expect(repository.joinedSessionId, discoveredSession.sessionId);
+    expect(state.session, same(joinedSession));
+    expect(state.status, JoinSessionStatus.joined);
+  });
+
+  test(
+    'joinDiscovered surfaces a not-paired failure without offering retry',
+    () async {
+      final repository = FakeSessionsRepository()
+        ..failure = const SessionsFailure(
+          SessionsFailureKind.notPaired,
+          'This device is no longer paired with that publisher. Pair again '
+          'from the pairing screen, then retry.',
+        );
+      final container = createContainer(repository);
+      addTearDown(container.dispose);
+      final viewModel = container.read(joinSessionViewModelProvider.notifier);
+
+      await viewModel.joinDiscovered(discoveredSession);
+
+      final state = container.read(joinSessionViewModelProvider);
+      expect(state.status, JoinSessionStatus.failed);
+      expect(state.errorMessage, contains('no longer paired'));
+      expect(state.canRetry, isFalse);
+    },
+  );
+
+  test(
+    'a retryable joinDiscovered failure retries the same session on retry()',
+    () async {
+      final repository = FakeSessionsRepository()
+        ..failure = const SessionsFailure(
+          SessionsFailureKind.network,
+          'Unable to join the session. Check your connection and retry.',
+        );
+      final container = createContainer(repository);
+      addTearDown(container.dispose);
+      final viewModel = container.read(joinSessionViewModelProvider.notifier);
+
+      await viewModel.joinDiscovered(discoveredSession);
+      expect(container.read(joinSessionViewModelProvider).canRetry, isTrue);
+
+      repository.failure = null;
+      await viewModel.retry();
+
+      final state = container.read(joinSessionViewModelProvider);
+      expect(repository.joinedSessionId, discoveredSession.sessionId);
+      expect(state.status, JoinSessionStatus.joined);
+      expect(state.session, same(joinedSession));
+    },
+  );
 }
