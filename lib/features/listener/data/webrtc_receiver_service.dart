@@ -237,8 +237,22 @@ class WebRtcReceiverService {
         _setState(ListenerConnectionState.reconnecting);
       case RtcConnectionState.failed:
         _stopStatsPolling();
-        _setStats(_stats.copyWith(iceState: 'Failed'));
-        _setState(ListenerConnectionState.failed);
+        final publisher = _publisherId;
+        if (publisher != null) {
+          // A failed ICE connection is recoverable while signaling is up (and
+          // while the phone is locked, where this used to permanently kill the
+          // stream): drop the dead peer connection and ask the publisher to
+          // re-offer. The publisher answers with a fresh webrtc.offer, which
+          // builds a brand-new peer connection in _handleOffer.
+          sonicLog('WebRTC', 'ice failed -> requesting re-offer from=$publisher');
+          _setStats(_stats.copyWith(iceState: 'Reconnecting'));
+          _setState(ListenerConnectionState.reconnecting);
+          unawaited(_disposePeerConnection());
+          _emit(SignalingMessageType.viewerReady, const {}, to: publisher);
+        } else {
+          _setStats(_stats.copyWith(iceState: 'Failed'));
+          _setState(ListenerConnectionState.failed);
+        }
       case RtcConnectionState.closed:
         _stopStatsPolling();
         _setStats(_stats.copyWith(iceState: 'Closed'));
@@ -372,6 +386,12 @@ class WebRtcReceiverService {
     final connection = _peerConnection;
     _peerConnection = null;
     if (connection != null) {
+      // Detach callbacks first: a late `closed` event from the connection
+      // being discarded must not overwrite the state of its replacement
+      // (e.g. flipping a just-set `reconnecting` back to `disconnected`).
+      connection.onIceCandidate = null;
+      connection.onRemoteStream = null;
+      connection.onConnectionState = null;
       await connection.dispose();
     }
   }

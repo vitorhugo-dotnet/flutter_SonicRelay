@@ -72,7 +72,15 @@ final appRouterProvider = Provider<GoRouter>((ref) {
   );
   ref.listen(deviceReadinessProvider, (_, _) => router.refresh());
   ref.listen(pairingViewModelProvider, (previous, next) {
-    ref.read(deviceReadinessProvider.notifier).syncPairings(next.pairings);
+    // Only emissions that carry an authoritative pairing list may drive readiness.
+    // A transient loading/submitting emission — and a failed load, whose list can be
+    // stale-empty — used to flip readiness to pairingRequired the moment the user
+    // opened "Manage pairings", and the redirect above then trapped every route at
+    // /pair with no way back to the dashboard.
+    if (next.status == PairingStatus.idle ||
+        next.status == PairingStatus.paired) {
+      ref.read(deviceReadinessProvider.notifier).syncPairings(next.pairings);
+    }
     if (previous?.status != PairingStatus.paired &&
         next.status == PairingStatus.paired) {
       router.go('/join');

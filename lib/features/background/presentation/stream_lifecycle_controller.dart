@@ -30,7 +30,12 @@ class StreamLifecycleController {
     required bool Function() keepPlayingInBackground,
     required Future<void> Function() onStopRequested,
     required Future<void> Function() onReconnectRequested,
-    Duration reconnectWindow = const Duration(seconds: 45),
+    // How long a backgrounded/locked phone keeps trying to reconnect before
+    // giving up. This used to be 45 seconds, which cut real streams short the
+    // moment a locked phone hit a flaky patch of network — the notification's
+    // Stop action already gives the user an early way out, so the window can
+    // afford to be generous.
+    Duration reconnectWindow = const Duration(minutes: 10),
     LifecycleTimerFactory? timerFactory,
   }) : _service = service,
        _keepPlaying = keepPlayingInBackground,

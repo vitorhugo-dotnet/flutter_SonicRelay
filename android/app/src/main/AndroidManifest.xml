@@ -17,6 +17,10 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"/>
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <!-- Partial wake lock held by the foreground service so audio and the
+         reconnect loop keep running with the screen locked (Doze can still
+         throttle the CPU of a mediaPlayback service without one). -->
+    <uses-permission android:name="android.permission.WAKE_LOCK"/>
     <application
         android:label="sonic_relay"
         android:name=".SonicRelayApplication"

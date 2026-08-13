@@ -71,7 +71,16 @@ class ListenerViewModel extends Notifier<ListenerState> {
     _signalingStateSubscription = _signaling.connectionState.listen((
       signaling,
     ) {
+      final previous = state.signaling;
       state = state.copyWith(signaling: signaling);
+      // When the socket comes back after an outage (e.g. the phone was locked
+      // through a network change), re-announce readiness so the publisher
+      // re-offers if the peer connection died while we were unreachable.
+      if (signaling == SignalingConnectionState.connected &&
+          (previous == SignalingConnectionState.reconnecting ||
+              previous == SignalingConnectionState.disconnected)) {
+        unawaited(_receiver.reconnect());
+      }
     });
 
     ref.onDispose(() {

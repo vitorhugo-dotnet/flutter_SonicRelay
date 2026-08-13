@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -49,6 +51,10 @@ class _CoturnUrlFieldState extends ConsumerState<CoturnUrlField> {
       return;
     }
     await ref.read(coturnOverrideProvider.notifier).set(url);
+    // Share the override with paired devices through the backend. Deliberately
+    // not awaited: the local save is what the user is confirming, and the
+    // best-effort push must not block the UI on a slow or offline backend.
+    unawaited(ref.read(relaySettingsSyncProvider).pushCoturnUrl(url));
     if (!mounted) return;
     setState(() => _error = null);
     ScaffoldMessenger.of(context)
@@ -60,6 +66,12 @@ class _CoturnUrlFieldState extends ConsumerState<CoturnUrlField> {
 
   @override
   Widget build(BuildContext context) {
+    // A pull from the backend (another paired device changed the override) must
+    // reach the visible text field, not just the provider.
+    ref.listen<String?>(coturnOverrideProvider, (_, next) {
+      final value = next ?? '';
+      if (_controller.text.trim() != value) _controller.text = value;
+    });
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
