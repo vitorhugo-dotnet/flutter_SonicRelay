@@ -12,9 +12,12 @@ import 'package:sonic_relay/core/websocket/websocket_client.dart';
 import 'package:sonic_relay/features/device_identity/data/device_identity_session.dart';
 import 'package:sonic_relay/features/listener/data/audio_receiver_service.dart';
 import 'package:sonic_relay/features/listener/data/webrtc_receiver_service.dart';
+import 'package:sonic_relay/features/listener/domain/listener_connection_state.dart';
 import 'package:sonic_relay/features/listener/presentation/listener_view_model.dart';
 import 'package:sonic_relay/features/sessions/domain/stream_session.dart';
 import 'package:sonic_relay/features/signaling/data/signaling_client.dart';
+import 'package:sonic_relay/features/signaling/domain/signaling_message.dart';
+import 'package:sonic_relay/features/signaling/domain/signaling_message_type.dart';
 
 DiagnosticLog _testLog() =>
     DiagnosticLog(Directory.systemTemp.createTempSync('sonicrelay_test_').path);
@@ -49,6 +52,53 @@ class FakeWebSocketConnection implements WebSocketConnection {
   }
 
   void emit(String data) => _controller.add(data);
+}
+
+class RecoveryFakePeerConnection implements RtcPeerConnection {
+  void Function(RtcConnectionState state)? _onConnectionState;
+
+  @override
+  set onIceCandidate(void Function(RtcIceCandidate candidate)? callback) {}
+
+  @override
+  set onRemoteStream(void Function(RtcMediaStream stream)? callback) {}
+
+  @override
+  set onConnectionState(void Function(RtcConnectionState state)? callback) =>
+      _onConnectionState = callback;
+
+  @override
+  Future<RtcConnectionStats?> getStats() async => null;
+
+  @override
+  Future<void> setRemoteDescription(RtcSessionDescription description) async {}
+
+  @override
+  Future<RtcSessionDescription> createAnswer() async =>
+      const RtcSessionDescription(sdp: 'answer-sdp', type: 'answer');
+
+  @override
+  Future<void> setLocalDescription(RtcSessionDescription description) async {}
+
+  @override
+  Future<void> addIceCandidate(RtcIceCandidate candidate) async {}
+
+  @override
+  Future<void> dispose() async {}
+
+  void fireConnectionState(RtcConnectionState state) =>
+      _onConnectionState?.call(state);
+}
+
+class RecoveryFakePeerConnectionFactory implements RtcPeerConnectionFactory {
+  final List<RecoveryFakePeerConnection> created = [];
+
+  @override
+  Future<RtcPeerConnection> create(RtcIceServerConfig iceServers) async {
+    final connection = RecoveryFakePeerConnection();
+    created.add(connection);
+    return connection;
+  }
 }
 
 class SlowFailingCloseWebSocketConnection implements WebSocketConnection {
@@ -410,4 +460,122 @@ void main() {
       expect(leaveStack.toString(), socketStack.toString());
     },
   );
+
+  group('signaling recovery', () {
+    /// Builds a live viewer: real receiver and signaling over fake transports,
+    /// with the peer connection already negotiated and reported [connected].
+    /// Returns the recorded outbound signals and a way to drop the socket.
+    Future<
+      ({
+        List<OutboundSignal> outbound,
+        RecoveryFakePeerConnection peer,
+        Future<void> Function() dropSocket,
+      })
+    >
+    startConnectedViewer() async {
+      final peerFactory = RecoveryFakePeerConnectionFactory();
+      final receiver = WebRtcReceiverService(
+        peerConnectionFactory: peerFactory,
+        audioReceiver: FakeAudioReceiverService(),
+        iceServers: const RtcIceServerConfig([]),
+      );
+      final sockets = <FakeWebSocketConnection>[];
+      final webSocketClient = WebSocketClient(
+        diagnosticLog: _testLog(),
+        connector: (uri, headers) async {
+          final socket = FakeWebSocketConnection();
+          sockets.add(socket);
+          return socket;
+        },
+        scheduleTimer: (delay, callback) => Timer(Duration.zero, callback),
+      );
+      final signalingClient = SignalingClient(
+        webSocketClient: webSocketClient,
+        deviceIdentitySession: FakeDeviceIdentitySession(),
+        diagnosticLog: _testLog(),
+      );
+      final container = ProviderContainer(
+        overrides: [
+          webRtcReceiverServiceProvider.overrideWithValue(receiver),
+          signalingClientProvider.overrideWithValue(signalingClient),
+        ],
+      );
+      addTearDown(() async {
+        container.dispose();
+        await signalingClient.dispose();
+        await receiver.dispose();
+      });
+
+      final outbound = <OutboundSignal>[];
+      receiver.outboundSignals.listen(outbound.add);
+      container.read(listenerViewModelProvider);
+      await signalingClient.connect(
+        session: StreamSession(
+          sessionId: 'session-1',
+          signalingUrl: Uri.parse('wss://stream.example/ws/signaling'),
+        ),
+      );
+      await Future<void>.delayed(Duration.zero);
+
+      await receiver.handleSignal(
+        SignalingMessage(
+          type: SignalingMessageType.webrtcOffer,
+          messageId: 'offer-1',
+          sessionId: 'session-1',
+          from: 'publisher-1',
+          timestamp: DateTime.now().toUtc(),
+          payload: const {'sdp': 'offer-sdp', 'type': 'offer'},
+        ),
+      );
+      await Future<void>.delayed(Duration.zero);
+      peerFactory.created.single.fireConnectionState(
+        RtcConnectionState.connected,
+      );
+      await Future<void>.delayed(Duration.zero);
+      expect(receiver.connectionStateValue, ListenerConnectionState.connected);
+
+      return (
+        outbound: outbound,
+        peer: peerFactory.created.single,
+        dropSocket: () async {
+          await sockets.first.close();
+          await Future<void>.delayed(Duration.zero);
+          await Future<void>.delayed(Duration.zero);
+        },
+      );
+    }
+
+    // The signaling socket dying says nothing about the media path: WebRTC keeps
+    // flowing over its own transport. Re-announcing readiness anyway makes the
+    // publisher restart ICE, so a socket that drops on a timer threw away a
+    // perfectly healthy stream — and the audio with it — on every drop.
+    test('does not renegotiate a peer connection that is still connected', () async {
+      final viewer = await startConnectedViewer();
+      viewer.outbound.clear();
+
+      await viewer.dropSocket();
+
+      expect(
+        viewer.outbound.map((signal) => signal.type),
+        isNot(contains(SignalingMessageType.viewerReady)),
+      );
+    });
+
+    // The mirror case: when the media path really is down, the recovered socket
+    // is the only chance to ask the publisher for a fresh offer, so the
+    // re-announcement must still happen.
+    test('re-announces readiness when the peer connection is down', () async {
+      final viewer = await startConnectedViewer();
+      viewer.peer.fireConnectionState(RtcConnectionState.disconnected);
+      await Future<void>.delayed(Duration.zero);
+      viewer.outbound.clear();
+
+      await viewer.dropSocket();
+
+      expect(
+        viewer.outbound.map((signal) => signal.type),
+        contains(SignalingMessageType.viewerReady),
+      );
+    });
+  });
 }

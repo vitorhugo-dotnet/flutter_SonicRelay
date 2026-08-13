@@ -1,5 +1,6 @@
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:sonic_relay/core/diagnostics/sonic_log.dart';
 import 'package:sonic_relay/core/webrtc/ice_servers_api.dart';
 import 'package:sonic_relay/core/webrtc/ice_servers_repository.dart';
 import 'package:sonic_relay/core/webrtc/relay_modes.dart';
@@ -121,6 +122,57 @@ void main() {
       expect(config.iceServers, isEmpty);
     },
   );
+
+  // Withholding Google STUN in production is deliberate, but the result is a
+  // peer connection with no STUN and no TURN: only host candidates, which
+  // cannot cross a NAT. That outcome used to be indistinguishable from a
+  // healthy resolve in the logs, so a viewer that could never connect looked
+  // like a viewer that simply failed.
+  test('logs when it resolves with no ICE servers at all', () async {
+    final logged = <(String, String)>[];
+    setSonicLogSink((tag, message) => logged.add((tag, message)));
+    addTearDown(() => setSonicLogSink(null));
+    final api = _StubIceServersApi(
+      _result(expiresAt: DateTime.utc(2026).add(const Duration(hours: 1))),
+    )..failWith(DioException(requestOptions: RequestOptions(path: '/x')));
+    final repo = IceServersRepository(
+      api: api,
+      allowGoogleStunDevFallback: false,
+      relayMode: () => RelayModes.automatic,
+      coturnOverride: () => null,
+    );
+
+    await repo.resolve();
+
+    expect(
+      logged.where(
+        (entry) => entry.$1 == 'WebRTC' && entry.$2.contains('no ICE servers'),
+      ),
+      isNotEmpty,
+    );
+  });
+
+  test('does not log the empty-list warning when servers were resolved', () async {
+    final logged = <(String, String)>[];
+    setSonicLogSink((tag, message) => logged.add((tag, message)));
+    addTearDown(() => setSonicLogSink(null));
+    final api = _StubIceServersApi(
+      _result(expiresAt: DateTime.utc(2026).add(const Duration(hours: 1))),
+    );
+    final repo = IceServersRepository(
+      api: api,
+      allowGoogleStunDevFallback: false,
+      relayMode: () => RelayModes.automatic,
+      coturnOverride: () => null,
+    );
+
+    await repo.resolve();
+
+    expect(
+      logged.where((entry) => entry.$2.contains('no ICE servers')),
+      isEmpty,
+    );
+  });
 
   test('returns the last good cache when a later refresh fails, even in production mode', () async {
     var now = DateTime.utc(2026);

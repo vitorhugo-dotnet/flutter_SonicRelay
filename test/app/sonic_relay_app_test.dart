@@ -6,6 +6,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sonic_relay/app/di/app_providers.dart';
 import 'package:sonic_relay/app/sonic_relay_app.dart';
+import 'package:sonic_relay/core/diagnostics/sonic_log.dart';
 import 'package:dio/dio.dart';
 import 'package:sonic_relay/core/storage/relay_mode_storage.dart';
 import 'package:sonic_relay/core/webrtc/relay_modes.dart';
@@ -145,6 +146,47 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(tester.takeException(), isNull);
+  });
+
+  // Without this wiring the mechanism in sonic_log.dart is inert in the real
+  // app: `Background` and `WebRTC` lines stay in logcat only, so an exported
+  // log from a phone that streamed for hours shows no foreground-service
+  // activity — which reads exactly like the service never having run.
+  testWidgets('running the app routes tagged logs into the exportable log', (
+    tester,
+  ) async {
+    addTearDown(() => setSonicLogSink(null));
+    final container = ProviderContainer(
+      overrides: [
+        deviceReadinessProvider.overrideWith(_ReadyReadinessNotifier.new),
+        diagnosticsDirectoryProvider.overrideWithValue(
+          _testDiagnosticsDirectory(),
+        ),
+        relayModeStorageProvider.overrideWithValue(_FakeRelayModeStorage()),
+        discoverableSessionsProvider.overrideWith(
+          (ref) => Stream.value(const []),
+        ),
+        relaySettingsApiProvider.overrideWithValue(_FakeRelaySettingsApi()),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: const SonicRelayApp(),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    sonicLog('Background', 'starting foreground service');
+    await tester.pumpAndSettle();
+
+    final events = container.read(diagnosticLogProvider).recentEvents;
+    expect(
+      events.map((event) => (event.category, event.message)),
+      contains(('Background', 'starting foreground service')),
+    );
   });
 }
 

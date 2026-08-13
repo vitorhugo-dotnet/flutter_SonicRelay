@@ -316,6 +316,15 @@ class WebRtcReceiverService {
       _previousInboundAudio = inbound;
     }
 
+    // How media actually reaches the device is otherwise visible only on
+    // screen, so an unattended session left no record of whether it was
+    // relayed — the first thing worth knowing when a viewer will not connect,
+    // or when a relay-only preference is not behaving as expected.
+    if (stats.transport != RtcTransportMode.unknown &&
+        stats.transport != _stats.transport) {
+      sonicLog('WebRTC', 'media path -> ${stats.transport.name}');
+    }
+
     _setStats(
       _stats.copyWith(
         rttMs: stats.rttMs,

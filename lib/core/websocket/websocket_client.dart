@@ -41,18 +41,35 @@ typedef WebSocketHeadersProvider =
 typedef WebSocketReconnectPredicate = bool Function(Object error);
 
 /// Default [WebSocketConnector] backed by `dart:io`'s [WebSocket].
+/// How often an open signaling socket sends a keepalive ping.
+///
+/// Between negotiations the signaling socket carries no traffic in either
+/// direction — the backend only answers `pong` to a client `ping` and never
+/// initiates one — so without this it is idle, and intermediaries reap idle
+/// WebSockets. In production that reap was observed at a near-constant ~90s,
+/// killing every viewer session and forcing a full renegotiation each time;
+/// nginx's own default read timeout is 60s. `dart:io` leaves [WebSocket.pingInterval]
+/// null by default, which is why the Windows publisher (`KeepAliveInterval = 20s`)
+/// survived on the same network where the Flutter viewer did not. Matching its
+/// 20s keeps a missed ping well inside the shortest window we know of.
+const signalingPingInterval = Duration(seconds: 20);
+
 Future<WebSocketConnection> ioWebSocketConnector(
   Uri uri,
   Map<String, String> headers,
 ) async {
   final socket = await WebSocket.connect(uri.toString(), headers: headers);
-  return _IoWebSocketConnection(socket);
+  socket.pingInterval = signalingPingInterval;
+  return IoWebSocketConnection(socket);
 }
 
-class _IoWebSocketConnection implements WebSocketConnection {
-  _IoWebSocketConnection(this._socket);
+class IoWebSocketConnection implements WebSocketConnection {
+  IoWebSocketConnection(this._socket);
 
   final WebSocket _socket;
+
+  /// How often this socket sends a keepalive ping, or null when it sends none.
+  Duration? get pingInterval => _socket.pingInterval;
 
   @override
   Stream<dynamic> get stream => _socket;

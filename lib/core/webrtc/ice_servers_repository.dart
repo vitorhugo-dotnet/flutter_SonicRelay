@@ -107,6 +107,18 @@ class IceServersRepository {
             : server,
       );
     }
+    if (servers.isEmpty) {
+      // No STUN and no TURN leaves the peer connection with host candidates
+      // only, which cannot cross a NAT — so the negotiation that follows is
+      // almost certainly doomed. Withholding the public-STUN fallback in
+      // production is deliberate, but the resulting dead connection used to be
+      // indistinguishable from any other ICE failure in the logs.
+      sonicLog(
+        'WebRTC',
+        'resolved with no ICE servers — host candidates only, '
+            'so this negotiation will fail behind any NAT',
+      );
+    }
     // forceRelay is preserved rather than defaulted: it is a separate field on the config
     // (applied as iceTransportPolicy) that the receiver service sets, not part of the list.
     return RtcIceServerConfig(servers, forceRelay: config.forceRelay);

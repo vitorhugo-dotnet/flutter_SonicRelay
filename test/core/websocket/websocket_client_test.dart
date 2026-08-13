@@ -158,6 +158,33 @@ class ManualTimer implements Timer {
 }
 
 void main() {
+  group('ioWebSocketConnector', () {
+    // A signaling socket carries no traffic between negotiations, and an idle
+    // WebSocket gets reaped by intermediaries — observed at ~90s in production,
+    // and nginx's own default read timeout is 60s. dart:io leaves pingInterval
+    // null (no keepalive at all) unless it is set explicitly.
+    test('keeps an idle socket alive with periodic pings', () async {
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      addTearDown(() => server.close(force: true));
+      server.listen((request) async {
+        final socket = await WebSocketTransformer.upgrade(request);
+        await socket.done;
+      });
+
+      final connection = await ioWebSocketConnector(
+        Uri.parse('ws://${server.address.address}:${server.port}'),
+        const {},
+      );
+      addTearDown(connection.close);
+
+      final interval = (connection as IoWebSocketConnection).pingInterval;
+      expect(interval, isNotNull, reason: 'no keepalive means the reap returns');
+      // Frequent enough that even a missed ping stays well inside the shortest
+      // idle window we know of, rather than merely under the observed ~90s.
+      expect(interval! * 2, lessThan(const Duration(seconds: 60)));
+    });
+  });
+
   group('ReconnectPolicy', () {
     test('zero jitter ratio returns the plain backoff delay', () {
       const policy = ReconnectPolicy(jitterRatio: 0);
