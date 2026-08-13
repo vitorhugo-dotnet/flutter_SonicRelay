@@ -8,10 +8,10 @@ import '../../core/diagnostics/diagnostic_log.dart';
 import '../../core/http/auth_interceptor.dart';
 import '../../core/http/dio_client.dart';
 import '../../core/storage/background_playback_storage.dart';
+import '../../core/storage/coturn_override_storage.dart';
 import '../../core/storage/relay_mode_storage.dart';
 import '../../core/storage/server_config_storage.dart';
 import '../../core/webrtc/relay_modes.dart';
-import '../../core/webrtc/relay_settings_api.dart';
 import '../../features/background/data/foreground_stream_service.dart';
 import '../../features/background/presentation/stream_lifecycle_controller.dart';
 import '../../features/listener/presentation/listener_view_model.dart';
@@ -26,6 +26,7 @@ import '../../features/device_identity/data/device_identity_session.dart';
 import '../../features/pairing/data/pairing_api.dart';
 import '../../features/pairing/data/pairing_repository.dart';
 import '../../features/pairing/domain/device_pairing.dart';
+import '../../features/sessions/data/dto/discoverable_session.dart';
 import '../../features/sessions/data/sessions_api.dart';
 import '../../features/sessions/data/sessions_repository.dart';
 import '../../features/listener/data/audio_receiver_service.dart';
@@ -88,13 +89,9 @@ final relayModeStorageProvider = Provider<RelayModeStorage>(
   (ref) => RelayModeStorage(ref.watch(secureStorageProvider)),
 );
 
-final relaySettingsApiProvider = Provider<RelaySettingsApi>(
-  (ref) => DioRelaySettingsApi(ref.watch(dioProvider)),
-);
-
-/// The server-synced relay policy (issue #26 follow-up). Local storage is a last-known-good
-/// cache only — [set] and [refresh] both write through the confirmed server value, never a
-/// locally-chosen one, so every device converges on the backend's single global setting.
+/// This device's relay policy. Local by design: it used to sync through a backend row that
+/// was global to the whole deployment, so one device changing it changed the relay for every
+/// other device the backend served.
 final relayModeProvider = NotifierProvider<RelayModeNotifier, String>(
   RelayModeNotifier.new,
 );
@@ -108,15 +105,35 @@ class RelayModeNotifier extends Notifier<String> {
   String build() => _initial;
 
   Future<void> set(String mode) async {
-    final result = await ref.read(relaySettingsApiProvider).update(relayMode: mode);
-    await ref.read(relayModeStorageProvider).write(result.relayMode);
-    state = result.relayMode;
+    await ref.read(relayModeStorageProvider).write(mode);
+    state = mode;
   }
+}
 
-  Future<void> refresh() async {
-    final result = await ref.read(relaySettingsApiProvider).fetch();
-    await ref.read(relayModeStorageProvider).write(result.relayMode);
-    state = result.relayMode;
+final coturnOverrideStorageProvider = Provider<CoturnOverrideStorage>(
+  (ref) => CoturnOverrideStorage(ref.watch(secureStorageProvider)),
+);
+
+/// This device's local override for the TURN URL the backend hands out, or null to use the
+/// backend's own value. See [CoturnOverrideStorage] for why it is never pre-filled and only
+/// works against a coturn sharing the deployment's static auth secret.
+final coturnOverrideProvider =
+    NotifierProvider<CoturnOverrideNotifier, String?>(
+      CoturnOverrideNotifier.new,
+    );
+
+class CoturnOverrideNotifier extends Notifier<String?> {
+  CoturnOverrideNotifier([this._initial]);
+
+  final String? _initial;
+
+  @override
+  String? build() => _initial;
+
+  Future<void> set(String? url) async {
+    final normalized = (url == null || url.trim().isEmpty) ? null : url.trim();
+    await ref.read(coturnOverrideStorageProvider).write(normalized);
+    state = normalized;
   }
 }
 
@@ -347,6 +364,18 @@ final sessionsRepositoryProvider = Provider<SessionsRepository>(
   ),
 );
 
+/// Polls for sessions of paired publishers while the join page is mounted. `autoDispose` so
+/// the poll stops with the page, and a short period because the publisher can start a session
+/// at any moment and this is the only signal the viewer gets.
+final discoverableSessionsProvider =
+    StreamProvider.autoDispose<List<DiscoverableSession>>((ref) async* {
+  final repository = ref.watch(sessionsRepositoryProvider);
+  while (true) {
+    yield await repository.discover();
+    await Future<void>.delayed(const Duration(seconds: 5));
+  }
+});
+
 final webSocketClientProvider = Provider<WebSocketClient>(
   (ref) => WebSocketClient(
     connector: ioWebSocketConnector,
@@ -371,7 +400,11 @@ final iceServersApiProvider = Provider<IceServersApi>(
 );
 
 final iceServersRepositoryProvider = Provider<IceServersRepository>(
-  (ref) => IceServersRepository(api: ref.watch(iceServersApiProvider)),
+  (ref) => IceServersRepository(
+    api: ref.watch(iceServersApiProvider),
+    relayMode: () => ref.read(relayModeProvider),
+    coturnOverride: () => ref.read(coturnOverrideProvider),
+  ),
 );
 
 final rtcPeerConnectionFactoryProvider = Provider<RtcPeerConnectionFactory>(

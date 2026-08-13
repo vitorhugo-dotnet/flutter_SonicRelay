@@ -2,6 +2,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sonic_relay/app/env/app_config.dart';
 import 'package:sonic_relay/core/http/manual_retry_required_exception.dart';
+import 'package:sonic_relay/features/sessions/data/dto/discoverable_session.dart';
 import 'package:sonic_relay/features/sessions/data/dto/join_session_request.dart';
 import 'package:sonic_relay/features/sessions/data/dto/join_session_response.dart';
 import 'package:sonic_relay/features/sessions/data/sessions_api.dart';
@@ -17,6 +18,49 @@ class FakeSessionsApi implements SessionsApi {
     if (error case final value?) throw value;
     return const JoinSessionResponse(sessionId: 'session-1', status: 'waiting');
   }
+
+  @override
+  Future<List<DiscoverableSession>> discover() async => const [];
+
+  @override
+  Future<JoinSessionResponse> joinById(String sessionId) async {
+    if (error case final value?) throw value;
+    return const JoinSessionResponse(sessionId: 'session-1', status: 'waiting');
+  }
+}
+
+class _StubSessionsApi implements SessionsApi {
+  _StubSessionsApi({required this.discoverable});
+
+  final List<DiscoverableSession> discoverable;
+
+  @override
+  Future<JoinSessionResponse> join(JoinSessionRequest request) =>
+      throw UnimplementedError();
+
+  @override
+  Future<JoinSessionResponse> joinById(String sessionId) =>
+      throw UnimplementedError();
+
+  @override
+  Future<List<DiscoverableSession>> discover() async => discoverable;
+}
+
+class _ThrowingSessionsApi implements SessionsApi {
+  _ThrowingSessionsApi(this.error);
+
+  final Object error;
+
+  @override
+  Future<JoinSessionResponse> join(JoinSessionRequest request) =>
+      throw UnimplementedError();
+
+  @override
+  Future<JoinSessionResponse> joinById(String sessionId) =>
+      throw UnimplementedError();
+
+  @override
+  Future<List<DiscoverableSession>> discover() async => throw error;
 }
 
 DioException dioFailure(int status, String code, {Object? error}) {
@@ -114,4 +158,50 @@ void main() {
       );
     });
   }
+
+  test('maps 403 not_paired to a pairing failure, not an invalid code', () async {
+    api.error = dioFailure(403, 'not_paired');
+
+    await expectLater(
+      repository.join('FE237F'),
+      throwsA(
+        isA<SessionsFailure>().having(
+          (failure) => failure.kind,
+          'kind',
+          SessionsFailureKind.notPaired,
+        ),
+      ),
+    );
+  });
+
+  test('discover maps the backend payload', () async {
+    final repository = SessionsRepository(
+      api: _StubSessionsApi(discoverable: const [
+        DiscoverableSession(
+          sessionId: '11111111-1111-1111-1111-111111111111',
+          publisherDeviceName: 'VITOR-DESKTOP',
+          status: 'waiting',
+          viewerCount: 0,
+          maxViewers: 3,
+        ),
+      ]),
+      config: AppConfig.fromServerUrl('https://example.test'),
+    );
+
+    final sessions = await repository.discover();
+
+    expect(sessions.single.publisherDeviceName, 'VITOR-DESKTOP');
+    expect(sessions.single.viewerCount, 0);
+  });
+
+  test('discover returns an empty list rather than throwing on failure', () async {
+    final repository = SessionsRepository(
+      api: _ThrowingSessionsApi(
+        DioException(requestOptions: RequestOptions(path: '/api/sessions/discoverable')),
+      ),
+      config: AppConfig.fromServerUrl('https://example.test'),
+    );
+
+    expect(await repository.discover(), isEmpty);
+  });
 }

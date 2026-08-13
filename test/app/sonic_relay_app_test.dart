@@ -8,7 +8,6 @@ import 'package:sonic_relay/app/di/app_providers.dart';
 import 'package:sonic_relay/app/sonic_relay_app.dart';
 import 'package:sonic_relay/core/storage/relay_mode_storage.dart';
 import 'package:sonic_relay/core/webrtc/relay_modes.dart';
-import 'package:sonic_relay/core/webrtc/relay_settings_api.dart';
 import 'package:sonic_relay/features/listener/presentation/listener_page.dart';
 import 'package:sonic_relay/features/sessions/presentation/join_session_page.dart';
 import 'package:sonic_relay/features/settings/presentation/settings_page.dart';
@@ -16,30 +15,8 @@ import 'package:sonic_relay/features/settings/presentation/settings_page.dart';
 String _testDiagnosticsDirectory() =>
     Directory.systemTemp.createTempSync('sonicrelay_app_test_').path;
 
-/// Settings' `CoturnUrlField` (visible once paired, see coturn_url_field.dart) fetches on
-/// mount, and so does the Connection section's on-mount `relayModeProvider.refresh()`. Without
-/// this override the real `DioRelaySettingsApi` schedules a connect-timeout timer that
-/// outlives the widget tree once these tests move on without awaiting it, tripping Flutter
-/// test's "A Timer is still pending" invariant.
-class _FakeRelaySettingsApi implements RelaySettingsApi {
-  @override
-  Future<RelaySettingsResult> fetch() async => const RelaySettingsResult(
-    relayMode: 'automatic',
-    turnUris: [],
-    hasCustomTurnSecret: false,
-  );
-
-  @override
-  Future<RelaySettingsResult> update({String? relayMode, List<String>? turnUris}) async =>
-      RelaySettingsResult(
-        relayMode: relayMode ?? 'automatic',
-        turnUris: turnUris ?? const [],
-        hasCustomTurnSecret: false,
-      );
-}
-
 /// Avoids the real `FlutterSecureStorage` plugin, which has no platform channel under
-/// `flutter test` — the Connection section's on-mount refresh writes through this on success.
+/// `flutter test`.
 class _FakeRelayModeStorage extends RelayModeStorage {
   _FakeRelayModeStorage() : super(const FlutterSecureStorage());
 
@@ -58,8 +35,10 @@ ProviderScope testApp() => ProviderScope(
     diagnosticsDirectoryProvider.overrideWithValue(
       _testDiagnosticsDirectory(),
     ),
-    relaySettingsApiProvider.overrideWithValue(_FakeRelaySettingsApi()),
     relayModeStorageProvider.overrideWithValue(_FakeRelayModeStorage()),
+    // Avoids a real Dio call (and its dangling timer) when the join page mounts and watches
+    // this provider eagerly.
+    discoverableSessionsProvider.overrideWith((ref) => Stream.value(const [])),
   ],
   child: const SonicRelayApp(),
 );
@@ -106,8 +85,10 @@ void main() {
             diagnosticsDirectoryProvider.overrideWithValue(
               diagnosticsDirectory,
             ),
-            relaySettingsApiProvider.overrideWithValue(_FakeRelaySettingsApi()),
             relayModeStorageProvider.overrideWithValue(_FakeRelayModeStorage()),
+            discoverableSessionsProvider.overrideWith(
+              (ref) => Stream.value(const []),
+            ),
           ],
           child: MaterialApp(
             theme: ThemeData.dark(useMaterial3: true),

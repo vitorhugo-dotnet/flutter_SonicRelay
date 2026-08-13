@@ -1,10 +1,13 @@
 import 'package:dio/dio.dart';
 
+import 'dto/discoverable_session.dart';
 import 'dto/join_session_request.dart';
 import 'dto/join_session_response.dart';
 
 abstract interface class SessionsApi {
   Future<JoinSessionResponse> join(JoinSessionRequest request);
+  Future<List<DiscoverableSession>> discover();
+  Future<JoinSessionResponse> joinById(String sessionId);
 }
 
 class DioSessionsApi implements SessionsApi {
@@ -17,6 +20,23 @@ class DioSessionsApi implements SessionsApi {
     final response = await _dio.post<Map<String, Object?>>(
       '/api/sessions/join',
       data: request.toJson(),
+    );
+    return JoinSessionResponse.fromJson(response.data!);
+  }
+
+  @override
+  Future<List<DiscoverableSession>> discover() async {
+    final response = await _dio.get<List<Object?>>('/api/sessions/discoverable');
+    return (response.data ?? const [])
+        .whereType<Map>()
+        .map((entry) => DiscoverableSession.fromJson(Map<String, Object?>.from(entry)))
+        .toList();
+  }
+
+  @override
+  Future<JoinSessionResponse> joinById(String sessionId) async {
+    final response = await _dio.post<Map<String, Object?>>(
+      '/api/sessions/$sessionId/join',
     );
     return JoinSessionResponse.fromJson(response.data!);
   }

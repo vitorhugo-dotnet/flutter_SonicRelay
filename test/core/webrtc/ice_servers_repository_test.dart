@@ -2,6 +2,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sonic_relay/core/webrtc/ice_servers_api.dart';
 import 'package:sonic_relay/core/webrtc/ice_servers_repository.dart';
+import 'package:sonic_relay/core/webrtc/relay_modes.dart';
 import 'package:sonic_relay/core/webrtc/rtc_ice_server_config.dart';
 
 class _StubIceServersApi implements IceServersApi {
@@ -48,7 +49,12 @@ void main() {
   test('returns the fetched config', () async {
     final now = DateTime.utc(2026);
     final api = _StubIceServersApi(_result(expiresAt: now.add(const Duration(hours: 1))));
-    final repo = IceServersRepository(api: api, now: () => now);
+    final repo = IceServersRepository(
+      api: api,
+      now: () => now,
+      relayMode: () => RelayModes.automatic,
+      coturnOverride: () => null,
+    );
 
     final config = await repo.resolve();
 
@@ -61,7 +67,12 @@ void main() {
   test('caches until 60s before expiresAt', () async {
     var now = DateTime.utc(2026);
     final api = _StubIceServersApi(_result(expiresAt: now.add(const Duration(hours: 1))));
-    final repo = IceServersRepository(api: api, now: () => now);
+    final repo = IceServersRepository(
+      api: api,
+      now: () => now,
+      relayMode: () => RelayModes.automatic,
+      coturnOverride: () => null,
+    );
 
     await repo.resolve();
     now = now.add(const Duration(seconds: 3600 - 60 - 1));
@@ -82,6 +93,8 @@ void main() {
       final repo = IceServersRepository(
         api: api,
         allowGoogleStunDevFallback: true,
+        relayMode: () => RelayModes.automatic,
+        coturnOverride: () => null,
       );
 
       final config = await repo.resolve();
@@ -99,6 +112,8 @@ void main() {
       final repo = IceServersRepository(
         api: api,
         allowGoogleStunDevFallback: false,
+        relayMode: () => RelayModes.automatic,
+        coturnOverride: () => null,
       );
 
       final config = await repo.resolve();
@@ -114,6 +129,8 @@ void main() {
       api: api,
       now: () => now,
       allowGoogleStunDevFallback: false,
+      relayMode: () => RelayModes.automatic,
+      coturnOverride: () => null,
     );
     await repo.resolve();
 
@@ -124,5 +141,196 @@ void main() {
     expect(config.iceServers.single.urls, [
       'turn:sonicrelay-turn.hugodotnet.dev:3478?transport=udp',
     ]);
+  });
+
+  test('a coturn override replaces the turn url and keeps the credentials', () async {
+    final repository = IceServersRepository(
+      api: _StubIceServersApi(
+        _result(
+          servers: const [
+            RtcIceServer(urls: ['stun:backend.example.com:3478']),
+            RtcIceServer(
+              urls: ['turn:backend.example.com:3478?transport=udp'],
+              username: '1700000000:device',
+              credential: 'signed-credential',
+            ),
+          ],
+          expiresAt: DateTime.now().add(const Duration(hours: 1)),
+        ),
+      ),
+      relayMode: () => RelayModes.automatic,
+      coturnOverride: () => 'turn:my-relay.example.com:3478?transport=udp',
+    );
+
+    final config = await repository.resolve();
+
+    final turn = config.iceServers.firstWhere((s) => s.urls.first.startsWith('turn:'));
+    expect(turn.urls.single, 'turn:my-relay.example.com:3478?transport=udp');
+    expect(turn.username, '1700000000:device');
+    expect(turn.credential, 'signed-credential');
+    expect(config.iceServers.any((s) => s.urls.first.startsWith('stun:')), isTrue);
+  });
+
+  test('no override passes the backend list through untouched', () async {
+    final repository = IceServersRepository(
+      api: _StubIceServersApi(
+        _result(
+          servers: const [
+            RtcIceServer(
+              urls: ['turn:backend.example.com:3478?transport=udp'],
+              username: 'u',
+              credential: 'c',
+            ),
+          ],
+          expiresAt: DateTime.now().add(const Duration(hours: 1)),
+        ),
+      ),
+      relayMode: () => RelayModes.automatic,
+      coturnOverride: () => null,
+    );
+
+    final config = await repository.resolve();
+
+    expect(config.iceServers.single.urls.single, 'turn:backend.example.com:3478?transport=udp');
+  });
+
+  test(
+    'a coturn override change between two resolve() calls is picked up on the second call, '
+    'with no extra fetch',
+    () async {
+      var now = DateTime.utc(2026);
+      var override = 'turn:old-relay.example.com:3478?transport=udp';
+      final api = _StubIceServersApi(
+        _result(
+          servers: const [
+            RtcIceServer(
+              urls: ['turn:backend.example.com:3478?transport=udp'],
+              username: 'u',
+              credential: 'c',
+            ),
+          ],
+          expiresAt: now.add(const Duration(hours: 1)),
+        ),
+      );
+      final repo = IceServersRepository(
+        api: api,
+        now: () => now,
+        relayMode: () => RelayModes.automatic,
+        coturnOverride: () => override,
+      );
+
+      final first = await repo.resolve();
+      expect(first.iceServers.single.urls.single, override);
+      expect(api.calls, 1);
+
+      // No time has passed and no fetch happens on the second call — this is the exact
+      // cache-hit path a user hits by editing Settings and rejoining within the TURN
+      // credential cache window.
+      override = 'turn:new-relay.example.com:3478?transport=udp';
+      final second = await repo.resolve();
+
+      expect(second.iceServers.single.urls.single, override);
+      expect(api.calls, 1);
+    },
+  );
+
+  test(
+    'a relay mode change between two resolve() calls is picked up on the second call, '
+    'with no extra fetch',
+    () async {
+      var now = DateTime.utc(2026);
+      var relayMode = RelayModes.automatic;
+      final api = _StubIceServersApi(
+        _result(
+          servers: const [
+            RtcIceServer(urls: ['stun:backend.example.com:3478']),
+            RtcIceServer(
+              urls: ['turn:backend.example.com:3478?transport=udp'],
+              username: 'u',
+              credential: 'c',
+            ),
+          ],
+          expiresAt: now.add(const Duration(hours: 1)),
+        ),
+      );
+      final repo = IceServersRepository(
+        api: api,
+        now: () => now,
+        relayMode: () => relayMode,
+        coturnOverride: () => null,
+      );
+
+      final first = await repo.resolve();
+      expect(first.iceServers.any((s) => s.urls.first.startsWith('turn:')), isTrue);
+      expect(api.calls, 1);
+
+      relayMode = RelayModes.disableFallback;
+      final second = await repo.resolve();
+
+      expect(second.iceServers.any((s) => s.urls.first.startsWith('turn:')), isFalse);
+      expect(api.calls, 1);
+    },
+  );
+
+  test(
+    'the failure fallback also applies current preferences to the stale raw cache',
+    () async {
+      var now = DateTime.utc(2026);
+      var relayMode = RelayModes.automatic;
+      final api = _StubIceServersApi(
+        _result(
+          servers: const [
+            RtcIceServer(urls: ['stun:backend.example.com:3478']),
+            RtcIceServer(
+              urls: ['turn:backend.example.com:3478?transport=udp'],
+              username: 'u',
+              credential: 'c',
+            ),
+          ],
+          expiresAt: now.add(const Duration(hours: 1)),
+        ),
+      );
+      final repo = IceServersRepository(
+        api: api,
+        now: () => now,
+        relayMode: () => relayMode,
+        coturnOverride: () => null,
+      );
+      await repo.resolve();
+
+      api.failWith(DioException(requestOptions: RequestOptions(path: '/x')));
+      now = now.add(const Duration(hours: 2));
+      relayMode = RelayModes.disableFallback;
+
+      final config = await repo.resolve();
+
+      expect(config.iceServers.any((s) => s.urls.first.startsWith('turn:')), isFalse);
+      expect(config.iceServers, hasLength(1));
+    },
+  );
+
+  test('disableFallback drops turn entries client side', () async {
+    final repository = IceServersRepository(
+      api: _StubIceServersApi(
+        _result(
+          servers: const [
+            RtcIceServer(urls: ['stun:backend.example.com:3478']),
+            RtcIceServer(
+              urls: ['turn:backend.example.com:3478?transport=udp'],
+              username: 'u',
+              credential: 'c',
+            ),
+          ],
+          expiresAt: DateTime.now().add(const Duration(hours: 1)),
+        ),
+      ),
+      relayMode: () => RelayModes.disableFallback,
+      coturnOverride: () => null,
+    );
+
+    final config = await repository.resolve();
+
+    expect(config.iceServers.any((s) => s.urls.first.startsWith('turn:')), isFalse);
+    expect(config.iceServers, hasLength(1));
   });
 }

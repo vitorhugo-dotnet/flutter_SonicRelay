@@ -2,9 +2,10 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import '../webrtc/relay_modes.dart';
 
-/// Last-known-good cache of the server-synced relay mode (issue #26 follow-up — this used
-/// to be the sole source of truth for a local-only "force relay" boolean; the real source of
-/// truth is now the backend's /api/settings/relay).
+/// Persists this device's local relay mode preference. Started as a local-only "force relay"
+/// boolean, briefly synced through a backend row shared by the whole deployment (issue #26
+/// follow-up), and is local-only again now that per-device preferences replaced that global
+/// row.
 class RelayModeStorage {
   const RelayModeStorage(this._storage);
 
