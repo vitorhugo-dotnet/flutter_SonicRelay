@@ -92,11 +92,15 @@ Re-announce `viewer.ready` on signaling recovery only when the receiver is not
 already `connected`. A healthy peer connection is never renegotiated.
 
 **A3 — `dotnet/services/SonicRelay.Api/Program.cs` and `infra/nginx/default.conf`**
-`WebSocketOptions.KeepAliveInterval = 30s` (the ASP.NET Core default of 2 minutes
-is longer than the ~90s reap window, so it never fired) plus explicit
+`WebSocketOptions.KeepAliveInterval = 20s`, matching both clients (the ASP.NET
+Core default of 2 minutes is longer than the ~90s reap window, so it never fired
+— the integration test confirms that default), plus explicit
 `proxy_read_timeout`/`proxy_send_timeout` on the WebSocket route, which currently
 inherits nginx's 60s default. This protects every client, including already
 installed app versions that lack A1.
+
+The interval is configured through DI rather than passed to `UseWebSockets()`, so
+the effective value is observable and can be asserted rather than assumed.
 
 ### B. ICE recovery
 
@@ -104,12 +108,19 @@ installed app versions that lack A1.
 A `viewer.ready` for an already-registered viewer performs an ICE restart and
 re-offer instead of returning silently.
 
-A repeated `viewer.ready` is debounced against the last offer sent to that
-viewer (2s, via an injected `TimeProvider`). Without the debounce, a signaling
-reconnect would produce two offers: one from the publisher's own
-`participant.reconnected` handler and one from the viewer's `viewer.ready`. The
-debounce collapses that pair while leaving genuine ICE recovery — which happens
-seconds to minutes after the last offer — unaffected.
+Only `viewer.ready` does this. A repeated `session.joined` is backend noise about
+a presence already acted on rather than a request for anything, so it stays
+deduped exactly as before — recovering on it would renegotiate on every
+re-broadcast.
+
+An ICE restart within 2s of the previous one for the same viewer is treated as a
+duplicate (via an injected `TimeProvider`). Without that, a dropped viewer socket
+would produce two offers: one from the publisher's own `participant.reconnected`
+handler and one from the viewer's `viewer.ready`, with the answer to the first
+still in flight when the second is created. Genuine recovery requests are seconds
+to minutes apart, so the window never suppresses one — a test pins that a later
+request restarts ICE again rather than the debounce spending the viewer's single
+recovery.
 
 **B2 — `flutter/lib/core/webrtc/ice_servers_repository.dart`**
 Log explicitly when the resolved ICE server list is empty. In release builds a
