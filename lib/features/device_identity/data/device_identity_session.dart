@@ -21,11 +21,13 @@ class DeviceIdentitySession {
     required DeviceCredentialStorage storage,
     required String deviceName,
     required String platform,
+    Future<String?> Function()? deviceNameResolver,
     DateTime Function()? now,
     void Function()? onInvalidated,
   }) : _api = api,
        _storage = storage,
        _deviceName = deviceName,
+       _deviceNameResolver = deviceNameResolver,
        _platform = platform,
        _now = now ?? DateTime.now,
        _onInvalidated = onInvalidated;
@@ -36,6 +38,12 @@ class DeviceIdentitySession {
   final DeviceIdentityApi _api;
   final DeviceCredentialStorage _storage;
   final String _deviceName;
+
+  /// Optional async lookup of the real device/model name (e.g. "Pixel 8"),
+  /// used at bootstrap so the publisher's paired-viewers list shows something
+  /// recognizable instead of a generic label. Best-effort: any failure falls
+  /// back to [_deviceName].
+  final Future<String?> Function()? _deviceNameResolver;
   final String _platform;
   final DateTime Function() _now;
   final void Function()? _onInvalidated;
@@ -84,6 +92,21 @@ class DeviceIdentitySession {
     if (generation == _generation) _invalidated = false;
   }
 
+  Future<String> _resolveDeviceName(int generation) async {
+    final resolver = _deviceNameResolver;
+    if (resolver == null) return _deviceName;
+    try {
+      final resolved = await resolver();
+      _ensureCurrent(generation);
+      final trimmed = resolved?.trim();
+      return (trimmed == null || trimmed.isEmpty) ? _deviceName : trimmed;
+    } on DeviceIdentitySessionInvalidatedException {
+      rethrow;
+    } catch (_) {
+      return _deviceName;
+    }
+  }
+
   Future<String> _exchange(int generation) async {
     try {
       return await _exchangeCurrent(generation);
@@ -99,7 +122,7 @@ class DeviceIdentitySession {
     if (credential == null) {
       final bootstrap = await _api.bootstrap(
         BootstrapDeviceRequest(
-          name: _deviceName,
+          name: await _resolveDeviceName(generation),
           deviceType: _deviceType,
           platform: _platform,
         ),

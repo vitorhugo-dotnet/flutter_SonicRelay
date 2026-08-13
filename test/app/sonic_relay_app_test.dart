@@ -6,8 +6,10 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sonic_relay/app/di/app_providers.dart';
 import 'package:sonic_relay/app/sonic_relay_app.dart';
+import 'package:dio/dio.dart';
 import 'package:sonic_relay/core/storage/relay_mode_storage.dart';
 import 'package:sonic_relay/core/webrtc/relay_modes.dart';
+import 'package:sonic_relay/core/webrtc/relay_settings_api.dart';
 import 'package:sonic_relay/features/listener/presentation/listener_page.dart';
 import 'package:sonic_relay/features/sessions/presentation/join_session_page.dart';
 import 'package:sonic_relay/features/settings/presentation/settings_page.dart';
@@ -29,6 +31,19 @@ class _FakeRelayModeStorage extends RelayModeStorage {
   Future<void> write(String mode) async => stored = mode;
 }
 
+/// Avoids a real Dio call (and its dangling timer) when the settings page
+/// mounts with a ready device and pulls the synced relay preferences.
+class _FakeRelaySettingsApi extends RelaySettingsApi {
+  _FakeRelaySettingsApi() : super(Dio());
+
+  @override
+  Future<RelaySettings> fetch() async =>
+      const RelaySettings(relayMode: RelayModes.automatic, turnUris: []);
+
+  @override
+  Future<void> update({String? relayMode, List<String>? turnUris}) async {}
+}
+
 ProviderScope testApp() => ProviderScope(
   overrides: [
     deviceReadinessProvider.overrideWith(_ReadyReadinessNotifier.new),
@@ -39,6 +54,7 @@ ProviderScope testApp() => ProviderScope(
     // Avoids a real Dio call (and its dangling timer) when the join page mounts and watches
     // this provider eagerly.
     discoverableSessionsProvider.overrideWith((ref) => Stream.value(const [])),
+    relaySettingsApiProvider.overrideWithValue(_FakeRelaySettingsApi()),
   ],
   child: const SonicRelayApp(),
 );
@@ -89,6 +105,7 @@ void main() {
             discoverableSessionsProvider.overrideWith(
               (ref) => Stream.value(const []),
             ),
+            relaySettingsApiProvider.overrideWithValue(_FakeRelaySettingsApi()),
           ],
           child: MaterialApp(
             theme: ThemeData.dark(useMaterial3: true),

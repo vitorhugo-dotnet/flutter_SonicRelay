@@ -10,6 +10,7 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
+import android.os.PowerManager
 import androidx.core.app.NotificationCompat
 import com.vitorhugo.sonicrelay.sonic_relay.MainActivity
 import com.vitorhugo.sonicrelay.sonic_relay.R
@@ -23,6 +24,8 @@ import com.vitorhugo.sonicrelay.sonic_relay.R
  */
 class SonicRelayForegroundService : Service() {
 
+    private var wakeLock: PowerManager.WakeLock? = null
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -32,6 +35,7 @@ class SonicRelayForegroundService : Service() {
                 val body = intent.getStringExtra(EXTRA_BODY).orEmpty()
                 val showReconnect = intent.getBooleanExtra(EXTRA_RECONNECT, false)
                 startForegroundCompat(buildNotification(title, body, showReconnect))
+                acquireWakeLock()
             }
             ACTION_NOTIF_OPEN -> {
                 ForegroundBridge.emit("open")
@@ -41,6 +45,7 @@ class SonicRelayForegroundService : Service() {
             ACTION_NOTIF_RECONNECT -> ForegroundBridge.emit("reconnect")
             ACTION_STOP -> {
                 val endedNotice = intent.getStringExtra(EXTRA_ENDED_NOTICE)
+                releaseWakeLock()
                 stopForegroundCompat()
                 if (!endedNotice.isNullOrBlank()) postEndedNotice(endedNotice)
                 stopSelf()
@@ -65,6 +70,36 @@ class SonicRelayForegroundService : Service() {
         // sets android:stopWithTask="false" explicitly; this override exists so
         // the intent is documented and a future edit doesn't accidentally add a
         // stopSelf() here. See issue #22.
+    }
+
+    override fun onDestroy() {
+        releaseWakeLock()
+        super.onDestroy()
+    }
+
+    /**
+     * A partial wake lock for the life of the active stream. The mediaPlayback
+     * foreground service keeps the *process* alive, but with the screen locked
+     * Doze can still throttle the CPU/network enough to starve WebRTC audio or
+     * stall the Dart reconnect loop; the wake lock keeps both running. It is
+     * released the moment the stream stops, so it never outlives the
+     * user-visible notification.
+     */
+    private fun acquireWakeLock() {
+        if (wakeLock?.isHeld == true) return
+        val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+        wakeLock = powerManager.newWakeLock(
+            PowerManager.PARTIAL_WAKE_LOCK,
+            "SonicRelay:StreamPlayback",
+        ).apply {
+            setReferenceCounted(false)
+            acquire(WAKE_LOCK_TIMEOUT_MS)
+        }
+    }
+
+    private fun releaseWakeLock() {
+        wakeLock?.takeIf { it.isHeld }?.release()
+        wakeLock = null
     }
 
     private fun startForegroundCompat(notification: Notification) {
@@ -169,6 +204,11 @@ class SonicRelayForegroundService : Service() {
         private const val ACTION_NOTIF_STOP = "com.vitorhugo.sonicrelay.action.NOTIF_STOP"
         private const val ACTION_NOTIF_RECONNECT =
             "com.vitorhugo.sonicrelay.action.NOTIF_RECONNECT"
+
+        // Safety valve so a leaked lock can never drain the battery for more
+        // than one long listening session; ACTION_UPDATE re-acquires (refreshes)
+        // it while the stream is actually alive.
+        private const val WAKE_LOCK_TIMEOUT_MS = 4L * 60 * 60 * 1000
 
         private const val CHANNEL_ID = "sonicrelay_background_stream"
         private const val NOTIFICATION_ID = 4201

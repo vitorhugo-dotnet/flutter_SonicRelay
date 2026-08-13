@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../app/di/app_providers.dart';
 import 'pairing_view_model.dart';
 import 'qr_scanner_page.dart';
 
@@ -31,10 +32,25 @@ class _PairingPageState extends ConsumerState<PairingPage> {
   Widget build(BuildContext context) {
     final state = ref.watch(pairingViewModelProvider);
     final viewModel = ref.read(pairingViewModelProvider.notifier);
+    final isReady =
+        ref.watch(deviceReadinessProvider).status == DeviceReadinessStatus.ready;
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('Pair device'),
+        // A paired device always has a way back to the dashboard, even when this
+        // page was reached by a redirect and there is nothing on the stack to pop.
+        leading: isReady
+            ? BackButton(
+                onPressed: () {
+                  if (context.canPop()) {
+                    context.pop();
+                  } else {
+                    context.go('/join');
+                  }
+                },
+              )
+            : null,
         actions: [
           IconButton(
             tooltip: 'Settings',
@@ -118,7 +134,13 @@ class _PairingPageState extends ConsumerState<PairingPage> {
               for (final pairing in state.pairings)
                 ListTile(
                   contentPadding: EdgeInsets.zero,
-                  title: Text('Publisher ${pairing.publisherDeviceId}'),
+                  // The publisher's machine name when the backend provides it
+                  // (e.g. "JCPC38"); the raw device id only as a fallback.
+                  title: Text(
+                    pairing.hasPublisherDeviceName
+                        ? pairing.publisherDeviceName!.trim()
+                        : 'Publisher ${pairing.publisherDeviceId}',
+                  ),
                   subtitle: Text(pairing.status),
                   trailing: TextButton(
                     onPressed:

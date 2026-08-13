@@ -296,6 +296,27 @@ class FlutterWebRtcPeerConnectionFactory implements RtcPeerConnectionFactory {
       await webrtc.Helper.setAndroidAudioConfiguration(
         concurrentPlaybackAudioConfiguration,
       );
+      if (webrtc.WebRTC.platformIsIOS) {
+        // Playback category (not the default play-and-record/voice-chat one)
+        // is what lets the AVAudioSession keep running when the phone locks or
+        // the app is backgrounded — paired with the UIBackgroundModes "audio"
+        // entry in Info.plist. mixWithOthers matches the Android profile:
+        // never pause another app's media.
+        sonicLog(
+          'Audio',
+          'applying iOS playback audio session '
+              '(category=playback, mixWithOthers) before negotiation',
+        );
+        await webrtc.Helper.setAppleAudioConfiguration(
+          webrtc.AppleAudioConfiguration(
+            appleAudioCategory: webrtc.AppleAudioCategory.playback,
+            appleAudioCategoryOptions: {
+              webrtc.AppleAudioCategoryOption.mixWithOthers,
+            },
+            appleAudioMode: webrtc.AppleAudioMode.default_,
+          ),
+        );
+      }
     } catch (error) {
       // Never let audio-routing configuration block a connection.
       sonicLog('Audio', 'failed to apply media audio profile: $error');

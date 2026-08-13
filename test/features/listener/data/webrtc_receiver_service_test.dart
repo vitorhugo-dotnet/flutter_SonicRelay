@@ -627,4 +627,78 @@ void main() {
     expect(factory.created.first.disposed, isTrue);
     expect(factory.created.last.remoteDescription?.sdp, 'offer-2');
   });
+
+  test(
+    'a failed ICE connection asks the known publisher to re-offer instead of dying',
+    () async {
+      await service.handleSignal(
+        _message(
+          SignalingMessageType.webrtcOffer,
+          from: 'publisher-1',
+          payload: {'sdp': 'offer-sdp', 'type': 'offer'},
+        ),
+      );
+      final connection = factory.created.single;
+      final states = <ListenerConnectionState>[];
+      service.connectionState.listen(states.add);
+      final outbound = <OutboundSignal>[];
+      service.outboundSignals.listen(outbound.add);
+
+      connection.fireConnectionState(RtcConnectionState.failed);
+      await Future<void>.delayed(Duration.zero);
+
+      expect(states, contains(ListenerConnectionState.reconnecting));
+      expect(states, isNot(contains(ListenerConnectionState.failed)));
+      expect(connection.disposed, isTrue);
+      final ready = outbound.single;
+      expect(ready.type, SignalingMessageType.viewerReady);
+      expect(ready.to, 'publisher-1');
+    },
+  );
+
+  test(
+    'a failed ICE connection with no known publisher still reports failed',
+    () async {
+      await service.handleSignal(
+        _message(
+          SignalingMessageType.webrtcOffer,
+          payload: {'sdp': 'offer-sdp', 'type': 'offer'},
+        ),
+      );
+      final connection = factory.created.single;
+      final states = <ListenerConnectionState>[];
+      service.connectionState.listen(states.add);
+
+      connection.fireConnectionState(RtcConnectionState.failed);
+      await Future<void>.delayed(Duration.zero);
+
+      expect(states, contains(ListenerConnectionState.failed));
+    },
+  );
+
+  test(
+    'a late closed event from a connection being replaced cannot clobber state',
+    () async {
+      await service.handleSignal(
+        _message(
+          SignalingMessageType.webrtcOffer,
+          from: 'publisher-1',
+          payload: {'sdp': 'offer-sdp', 'type': 'offer'},
+        ),
+      );
+      final connection = factory.created.single;
+      final states = <ListenerConnectionState>[];
+      service.connectionState.listen(states.add);
+
+      connection.fireConnectionState(RtcConnectionState.failed);
+      await Future<void>.delayed(Duration.zero);
+      // The discarded connection fires `closed` while it is torn down; the
+      // reconnecting state driving the background service must survive it.
+      connection.fireConnectionState(RtcConnectionState.closed);
+      await Future<void>.delayed(Duration.zero);
+
+      expect(service.connectionStateValue, ListenerConnectionState.reconnecting);
+      expect(states, isNot(contains(ListenerConnectionState.disconnected)));
+    },
+  );
 }

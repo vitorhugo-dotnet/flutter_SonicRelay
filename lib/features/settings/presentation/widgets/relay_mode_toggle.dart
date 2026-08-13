@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -6,8 +8,8 @@ import '../../../../core/webrtc/relay_modes.dart';
 
 /// Lets the viewer choose how ICE connects — automatic (direct with relay fallback), forced
 /// relay-only, or relay disabled entirely — instead of the old force-relay-only toggle. The
-/// choice is a local, per-device preference (see [relayModeProvider]); it does not affect any
-/// other device.
+/// choice applies locally right away (see [relayModeProvider]) and is shared with the user's
+/// paired devices through the backend's per-device relay settings.
 class RelayModeToggle extends ConsumerWidget {
   const RelayModeToggle({super.key});
 
@@ -19,6 +21,9 @@ class RelayModeToggle extends ConsumerWidget {
       if (mode == null) return;
       try {
         await ref.read(relayModeProvider.notifier).set(mode);
+        // Share the choice with paired devices through the backend. Not
+        // awaited: best-effort sync must not block the toggle on the network.
+        unawaited(ref.read(relaySettingsSyncProvider).pushRelayMode(mode));
       } catch (_) {
         if (!context.mounted) return;
         ScaffoldMessenger.of(context)

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -13,11 +15,25 @@ import 'widgets/keep_playing_toggle.dart';
 import 'widgets/relay_mode_toggle.dart';
 import 'widgets/server_url_field.dart';
 
-class SettingsPage extends ConsumerWidget {
+class SettingsPage extends ConsumerStatefulWidget {
   const SettingsPage({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<SettingsPage> createState() => _SettingsPageState();
+}
+
+class _SettingsPageState extends ConsumerState<SettingsPage> {
+  @override
+  void initState() {
+    super.initState();
+    // Pick up relay preferences saved on a paired device (best-effort).
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) unawaited(ref.read(relaySettingsSyncProvider).pull());
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Settings')),
       body: SafeArea(
@@ -82,13 +98,15 @@ class SettingsPage extends ConsumerWidget {
                                 const _SettingsRow(
                                   icon: Icons.dns_outlined,
                                   title: 'Coturn',
-                                  subtitle: 'TURN server this backend hands out',
+                                  subtitle:
+                                      'Optional custom relay (TURN) server',
                                 ),
                                 const SizedBox(height: AppSpacing.sm),
                                 const CoturnUrlField(),
                                 const SizedBox(height: AppSpacing.sm),
                                 Text(
-                                  'Applies to this device only.',
+                                  'Leave blank to use the SonicRelay-provided '
+                                  'relay. Synced to your paired devices.',
                                   style: Theme.of(context).textTheme.bodySmall,
                                 ),
                               ],
@@ -188,7 +206,7 @@ class _ConnectionSection extends ConsumerWidget {
         ),
         const SizedBox(height: AppSpacing.sm),
         Text(
-          'Applies to this device only.',
+          'Synced to your paired devices.',
           style: Theme.of(context).textTheme.bodySmall,
         ),
       ],

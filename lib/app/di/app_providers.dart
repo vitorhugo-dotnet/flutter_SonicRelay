@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:device_info_plus/device_info_plus.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -12,6 +13,7 @@ import '../../core/storage/coturn_override_storage.dart';
 import '../../core/storage/relay_mode_storage.dart';
 import '../../core/storage/server_config_storage.dart';
 import '../../core/webrtc/relay_modes.dart';
+import '../../core/webrtc/relay_settings_api.dart';
 import '../../features/background/data/foreground_stream_service.dart';
 import '../../features/background/presentation/stream_lifecycle_controller.dart';
 import '../../features/listener/presentation/listener_view_model.dart';
@@ -110,6 +112,67 @@ class RelayModeNotifier extends Notifier<String> {
   }
 }
 
+final relaySettingsApiProvider = Provider<RelaySettingsApi>(
+  (ref) => RelaySettingsApi(ref.watch(dioProvider)),
+);
+
+/// Best-effort two-way sync between the local relay preferences and the
+/// backend's per-device relay settings. The backend resolves the effective
+/// settings across this device's active pairings (latest write wins), so a
+/// change made here reaches the paired desktop and a change made there shows
+/// up here on the next [pull]. Every call is best-effort: an unreachable or
+/// older backend leaves the local preferences untouched and fully functional.
+final relaySettingsSyncProvider = Provider<RelaySettingsSync>(
+  RelaySettingsSync.new,
+);
+
+class RelaySettingsSync {
+  RelaySettingsSync(this._ref);
+
+  final Ref _ref;
+
+  Future<void> pull() async {
+    if (_ref.read(deviceReadinessProvider).status !=
+        DeviceReadinessStatus.ready) {
+      return;
+    }
+    try {
+      final settings = await _ref.read(relaySettingsApiProvider).fetch();
+      if (RelayModes.isValid(settings.relayMode)) {
+        await _ref.read(relayModeProvider.notifier).set(settings.relayMode);
+      }
+      await _ref
+          .read(coturnOverrideProvider.notifier)
+          .set(settings.turnUris.isEmpty ? null : settings.turnUris.first);
+    } catch (_) {
+      // Keep the local values; sync must never break the settings screen.
+    }
+  }
+
+  Future<void> pushRelayMode(String mode) async {
+    try {
+      await _ref.read(relaySettingsApiProvider).update(relayMode: mode);
+    } catch (_) {
+      // The local save already succeeded; the next successful push wins.
+    }
+  }
+
+  Future<void> pushCoturnUrl(String? url) async {
+    final normalized = url?.trim();
+    try {
+      await _ref
+          .read(relaySettingsApiProvider)
+          .update(
+            turnUris: normalized == null || normalized.isEmpty
+                ? const []
+                : [normalized],
+          );
+    } catch (_) {
+      // Same best-effort contract as pushRelayMode.
+    }
+  }
+}
+
 final coturnOverrideStorageProvider = Provider<CoturnOverrideStorage>(
   (ref) => CoturnOverrideStorage(ref.watch(secureStorageProvider)),
 );
@@ -140,6 +203,37 @@ class CoturnOverrideNotifier extends Notifier<String?> {
 final devicePlatformProvider = Provider<String>(
   (ref) => Platform.operatingSystem,
 );
+
+/// Resolves this device's human name (model or user-assigned name) so the
+/// publisher's paired-viewers list can show "Pixel 8" instead of a GUID or a
+/// generic "SonicRelay android viewer" label. Best-effort by design: returning
+/// null keeps the generic fallback name.
+final deviceDisplayNameProvider = Provider<Future<String?> Function()>((ref) {
+  return () async {
+    final plugin = DeviceInfoPlugin();
+    if (Platform.isAndroid) {
+      final info = await plugin.androidInfo;
+      final manufacturer = info.manufacturer.trim();
+      final model = info.model.trim();
+      if (model.isEmpty) return null;
+      if (manufacturer.isEmpty ||
+          model.toLowerCase().startsWith(manufacturer.toLowerCase())) {
+        return model;
+      }
+      return '${manufacturer[0].toUpperCase()}${manufacturer.substring(1)} '
+          '$model';
+    }
+    if (Platform.isIOS) {
+      final info = await plugin.iosInfo;
+      final name = info.name.trim();
+      return name.isEmpty ? info.utsname.machine : name;
+    }
+    if (Platform.isMacOS) return (await plugin.macOsInfo).computerName;
+    if (Platform.isWindows) return (await plugin.windowsInfo).computerName;
+    if (Platform.isLinux) return (await plugin.linuxInfo).prettyName;
+    return null;
+  };
+});
 
 final deviceCredentialStorageProvider = Provider<DeviceCredentialStorage>(
   (ref) => DeviceCredentialStorage(ref.watch(secureStorageProvider)),
@@ -177,6 +271,7 @@ final deviceIdentitySessionProvider = Provider<DeviceIdentitySession>(
     api: ref.watch(deviceIdentityApiProvider),
     storage: ref.watch(deviceCredentialStorageProvider),
     deviceName: 'SonicRelay ${ref.watch(devicePlatformProvider)} viewer',
+    deviceNameResolver: ref.watch(deviceDisplayNameProvider),
     platform: ref.watch(devicePlatformProvider),
     onInvalidated: () =>
         ref.read(deviceIdentityInvalidationProvider.notifier).publish(),
