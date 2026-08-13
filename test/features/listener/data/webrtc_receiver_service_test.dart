@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:sonic_relay/core/diagnostics/sonic_log.dart';
 import 'package:sonic_relay/core/webrtc/rtc_ice_server_config.dart';
 import 'package:sonic_relay/core/webrtc/rtc_peer_connection_factory.dart';
 import 'package:sonic_relay/features/listener/data/audio_receiver_service.dart';
@@ -506,6 +507,51 @@ void main() {
     expect(service.statsValue.rttMs, 42);
     expect(service.statsValue.jitterMs, 7);
     expect(service.statsValue.transport, RtcTransportMode.relay);
+  });
+
+  // Whether audio is actually relayed is otherwise only visible on screen, so a
+  // session that ran unattended left no record of how media reached the device —
+  // which is the first thing worth knowing when a viewer will not connect.
+  test('logs the media path the first time it becomes known', () async {
+    final logged = <String>[];
+    setSonicLogSink((tag, message) => logged.add(message));
+    addTearDown(() => setSonicLogSink(null));
+    await service.handleSignal(
+      _message(
+        SignalingMessageType.webrtcOffer,
+        payload: {'sdp': 'offer-sdp', 'type': 'offer'},
+      ),
+    );
+    factory.created.single.nextStats = const RtcConnectionStats(
+      transport: RtcTransportMode.relay,
+    );
+
+    await service.refreshStats();
+
+    expect(logged.where((m) => m.contains('media path -> relay')), hasLength(1));
+  });
+
+  test('does not repeat the media-path log while it stays the same', () async {
+    final logged = <String>[];
+    setSonicLogSink((tag, message) => logged.add(message));
+    addTearDown(() => setSonicLogSink(null));
+    await service.handleSignal(
+      _message(
+        SignalingMessageType.webrtcOffer,
+        payload: {'sdp': 'offer-sdp', 'type': 'offer'},
+      ),
+    );
+    factory.created.single.nextStats = const RtcConnectionStats(
+      transport: RtcTransportMode.direct,
+    );
+
+    await service.refreshStats();
+    await service.refreshStats();
+
+    expect(
+      logged.where((m) => m.contains('media path -> direct')),
+      hasLength(1),
+    );
   });
 
   test('refreshStats derives interval loss/concealment/jitter-buffer metrics', () async {

@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../core/diagnostics/sonic_log.dart';
 import 'di/app_providers.dart';
 import 'router/app_router.dart';
 import 'theme/app_theme.dart';
@@ -20,10 +21,18 @@ class _SonicRelayAppState extends ConsumerState<SonicRelayApp>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    // Send the tagged signaling/WebRTC/background lines to the log the user can
+    // export, not just to logcat — which is out of reach on the phone that has
+    // actually been streaming unattended.
+    final diagnosticLog = ref.read(diagnosticLogProvider);
+    setSonicLogSink(
+      (tag, message) => unawaited(diagnosticLog.write(tag, message)),
+    );
   }
 
   @override
   void dispose() {
+    setSonicLogSink(null);
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }

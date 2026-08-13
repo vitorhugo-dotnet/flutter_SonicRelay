@@ -76,9 +76,16 @@ class ListenerViewModel extends Notifier<ListenerState> {
       // When the socket comes back after an outage (e.g. the phone was locked
       // through a network change), re-announce readiness so the publisher
       // re-offers if the peer connection died while we were unreachable.
+      //
+      // Only if it actually died, though. Media rides its own transport, so a
+      // signaling outage on its own says nothing about whether audio is still
+      // flowing. Re-announcing regardless made the publisher restart ICE, which
+      // meant a socket that dropped on a timer tore down a perfectly healthy
+      // stream — and cut the audio — every single time it dropped.
       if (signaling == SignalingConnectionState.connected &&
           (previous == SignalingConnectionState.reconnecting ||
-              previous == SignalingConnectionState.disconnected)) {
+              previous == SignalingConnectionState.disconnected) &&
+          _receiver.connectionStateValue != ListenerConnectionState.connected) {
         unawaited(_receiver.reconnect());
       }
     });
