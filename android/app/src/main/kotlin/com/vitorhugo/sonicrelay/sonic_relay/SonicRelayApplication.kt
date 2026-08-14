@@ -1,6 +1,7 @@
 package com.vitorhugo.sonicrelay.sonic_relay
 
 import android.app.Application
+import com.vitorhugo.sonicrelay.sonic_relay.background.ForegroundChannels
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.embedding.engine.FlutterEngineCache
 import io.flutter.embedding.engine.dart.DartExecutor
@@ -24,8 +25,15 @@ class SonicRelayApplication : Application() {
         super.onCreate()
 
         val engine = FlutterEngine(this)
-        engine.dartExecutor.executeDartEntrypoint(DartExecutor.DartEntrypoint.createDefault())
+        // Everything the Dart entrypoint may talk to must be registered before it runs. The
+        // foreground channels in particular: Dart subscribes to the notification-action event
+        // channel on its own schedule, and a subscription that lands before the handler exists
+        // is not retried — it just leaves the notification buttons permanently dead. Registering
+        // them here (once per process, on the engine that outlives every activity) closes that
+        // window; see ForegroundChannels.
         GeneratedPluginRegistrant.registerWith(engine)
+        ForegroundChannels.register(this, engine.dartExecutor.binaryMessenger)
+        engine.dartExecutor.executeDartEntrypoint(DartExecutor.DartEntrypoint.createDefault())
         FlutterEngineCache.getInstance().put(ENGINE_ID, engine)
     }
 

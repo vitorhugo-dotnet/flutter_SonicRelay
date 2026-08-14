@@ -118,7 +118,16 @@ class AndroidForegroundStreamServiceBridge implements ForegroundStreamService {
       'reconnect' => ForegroundServiceAction.reconnect,
       _ => null,
     };
-    if (action != null && !_actions.isClosed) _actions.add(action);
+    if (action == null) {
+      sonicLog('Background', 'ignoring unknown foreground action: $event');
+      return;
+    }
+    // Logged on arrival, before any handler runs: a notification button that did
+    // nothing used to leave no trace at all on either side of the platform
+    // channel, which made a dead button indistinguishable from a press that was
+    // received and then ignored.
+    sonicLog('Background', 'notification action received: ${action.name}');
+    if (!_actions.isClosed) _actions.add(action);
   }
 
   @override
