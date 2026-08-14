@@ -153,13 +153,15 @@ class StreamLifecycleController {
   }
 
   void _handleAction(ForegroundServiceAction action) {
+    sonicLog('Background', 'handling notification action: ${action.name}');
     switch (action) {
       case ForegroundServiceAction.stop:
         unawaited(_onStopRequested());
       case ForegroundServiceAction.reconnect:
         unawaited(_onReconnectRequested());
       case ForegroundServiceAction.open:
-        // The main window is brought forward natively; nothing to do here.
+        // The notification's PendingIntent brings the activity forward directly;
+        // nothing to do here.
         break;
     }
   }
