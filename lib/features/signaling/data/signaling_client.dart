@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math';
 
 import '../../../core/diagnostics/diagnostic_log.dart';
+import '../../../core/network/network_monitor.dart';
 import '../../../core/websocket/websocket_client.dart';
 import '../../../core/websocket/websocket_message.dart';
 import '../../device_identity/data/device_identity_session.dart';
@@ -30,6 +31,7 @@ class SignalingClient {
     required DeviceIdentitySession deviceIdentitySession,
     required DiagnosticLog diagnosticLog,
     SignalingMessageMapper mapper = const SignalingMessageMapper(),
+    NetworkMonitor networkMonitor = const NoopNetworkMonitor(),
     Random? random,
   }) : _webSocketClient = webSocketClient,
        _deviceIdentitySession = deviceIdentitySession,
@@ -40,6 +42,7 @@ class SignalingClient {
       _handleTransportState,
     );
     _messageSubscription = _webSocketClient.messages.listen(_handleRawMessage);
+    _networkSubscription = networkMonitor.onChanged.listen(_handleNetworkChange);
   }
 
   final WebSocketClient _webSocketClient;
@@ -55,6 +58,7 @@ class SignalingClient {
   late final StreamSubscription<WebSocketConnectionState>
   _connectionSubscription;
   late final StreamSubscription<WebSocketMessage> _messageSubscription;
+  late final StreamSubscription<bool> _networkSubscription;
 
   StreamSession? _session;
   bool _leaving = false;
@@ -97,6 +101,52 @@ class SignalingClient {
     return base.replace(queryParameters: {'sessionId': sessionId});
   }
 
+  /// A transport handover (Wi-Fi dropped, cellular came up) invalidates
+  /// whatever backoff the socket was sitting on: the delay was chosen while
+  /// the device had no route, and the device now has one.
+  void _handleNetworkChange(bool online) {
+    unawaited(
+      _diagnosticLog.write('Signaling', 'network changed online=$online'),
+    );
+    if (!online) return;
+    nudge('network available');
+  }
+
+  /// Retries the signaling socket immediately if it is down, ignoring any
+  /// pending backoff. Safe to call at any time: it does nothing when there is
+  /// no session, when the viewer is leaving, or when the socket is already up.
+  ///
+  /// Two callers matter. A network handover raises the odds that a retry will
+  /// now succeed; and the app returning to the foreground is the moment to
+  /// re-check a socket whose reconnect chain may not have survived being
+  /// backgrounded — Android freezes a process with no foreground service, and
+  /// a `Timer` that was pending when it froze is simply gone. Without this the
+  /// viewer sits disconnected forever with no timer left to recover it, which
+  /// is what a real outage produced: fourteen failed attempts, then silence
+  /// through both a network change and a foreground resume.
+  void nudge(String reason) {
+    if (_session == null || _leaving) return;
+    _webSocketClient.retryNow(reason);
+  }
+
+  /// Closes and reopens the socket for the current session, so the backend
+  /// re-announces this viewer's presence to the publisher from scratch. Used
+  /// as the last escalation when the publisher stops answering `viewer.ready`
+  /// over an otherwise healthy socket.
+  Future<void> reopen() async {
+    final session = _session;
+    if (session == null || _leaving) return;
+    unawaited(
+      _diagnosticLog.write(
+        'Signaling',
+        'reopening socket for sessionId=${session.sessionId}',
+      ),
+    );
+    await _webSocketClient.disconnect();
+    if (_leaving || !identical(_session, session)) return;
+    await connect(session: session);
+  }
+
   void _handleTransportState(WebSocketConnectionState state) {
     switch (state) {
       case WebSocketConnectionState.connecting:
@@ -116,7 +166,12 @@ class SignalingClient {
       _diagnosticLog.write(
         'Signaling',
         'recv type=${message.type.wireValue} from=${message.from} '
-            'to=${message.to}',
+            'to=${message.to}'
+            // The backend answers a message it could not route with an `error`
+            // envelope carrying a `code` (e.g. `participant_not_found` when the
+            // publisher is not currently connected). Logging only the type left
+            // a rejected `viewer.ready` indistinguishable from an accepted one.
+            '${message.type == SignalingMessageType.error ? ' code=${message.payload['code']}' : ''}',
       ),
     );
     _messageController.add(message);
@@ -196,6 +251,7 @@ class SignalingClient {
 
   Future<void> dispose() async {
     _leaving = true;
+    await _networkSubscription.cancel();
     await _connectionSubscription.cancel();
     await _messageSubscription.cancel();
     await _webSocketClient.dispose();

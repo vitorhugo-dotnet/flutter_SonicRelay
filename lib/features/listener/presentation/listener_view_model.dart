@@ -57,6 +57,11 @@ class ListenerViewModel extends Notifier<ListenerState> {
     _receiver = ref.watch(webRtcReceiverServiceProvider);
 
     _messageSubscription = _signaling.messages.listen(_receiver.handleSignal);
+    // Last-resort recovery when the publisher stops answering `viewer.ready`
+    // over a socket that is otherwise healthy: reopen it so the backend
+    // re-announces this viewer. The receiver owns the WebRTC state and the
+    // signaling client owns the socket, so the two are joined here.
+    _receiver.onRejoinRequested = _signaling.reopen;
     _outboundSubscription = _receiver.outboundSignals.listen((signal) {
       _signaling.send(signal.type, signal.payload, to: signal.to);
     });
@@ -91,6 +96,7 @@ class ListenerViewModel extends Notifier<ListenerState> {
     });
 
     ref.onDispose(() {
+      _receiver.onRejoinRequested = null;
       _messageSubscription?.cancel();
       _outboundSubscription?.cancel();
       _connectionSubscription?.cancel();
@@ -114,6 +120,18 @@ class ListenerViewModel extends Notifier<ListenerState> {
   /// Nudges a stalled connection to recover by re-announcing readiness to the
   /// publisher (invoked from the background notification's "Reconnect" action).
   Future<void> reconnect() => _receiver.reconnect();
+
+  /// Re-checks both layers when the app returns to the foreground: the socket
+  /// retries immediately instead of waiting out a backoff scheduled while the
+  /// device was offline, and a peer connection that died meanwhile asks the
+  /// publisher to re-offer. Cheap and idempotent — each half no-ops when its
+  /// layer is already healthy.
+  void resume() {
+    _signaling.nudge('app resumed');
+    if (_receiver.connectionStateValue == ListenerConnectionState.reconnecting) {
+      unawaited(_receiver.reconnect());
+    }
+  }
 
   /// Leaves the session: invalidates signaling first so no late token, socket,
   /// or offer can race with peer-connection/audio teardown. Both cleanups run

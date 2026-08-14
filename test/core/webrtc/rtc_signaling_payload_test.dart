@@ -2,6 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:sonic_relay/core/webrtc/rtc_peer_connection_factory.dart';
 
 void main() {
+  _candidatePairTests();
   group('RtcSessionDescription', () {
     test('parses a flat offer payload and round-trips', () {
       final desc = RtcSessionDescription.fromSignalingPayload({
@@ -81,6 +82,54 @@ void main() {
 
       expect(withMid.nativeSafeSdpMid, '0');
       expect(withoutMid.nativeSafeSdpMid, '');
+    });
+  });
+}
+
+void _candidatePairTests() {
+  group('describeCandidatePair', () {
+    test('labels both sides and the protocol', () {
+      expect(
+        describeCandidatePair(
+          localType: 'relay',
+          remoteType: 'srflx',
+          protocol: 'udp',
+        ),
+        'relay/srflx udp',
+      );
+    });
+
+    test('keeps the pair readable when one side reports no type', () {
+      expect(
+        describeCandidatePair(
+          localType: 'host',
+          remoteType: null,
+          protocol: 'udp',
+        ),
+        'host/? udp',
+      );
+    });
+
+    test('omits the protocol when the platform does not report one', () {
+      expect(
+        describeCandidatePair(
+          localType: 'relay',
+          remoteType: 'relay',
+          protocol: null,
+        ),
+        'relay/relay',
+      );
+    });
+
+    test('is null when neither side reported a candidate type', () {
+      expect(
+        describeCandidatePair(
+          localType: null,
+          remoteType: null,
+          protocol: 'udp',
+        ),
+        isNull,
+      );
     });
   });
 }

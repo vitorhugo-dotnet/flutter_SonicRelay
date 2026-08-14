@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/diagnostics/sonic_log.dart';
+import '../features/listener/presentation/listener_view_model.dart';
 import 'di/app_providers.dart';
 import 'router/app_router.dart';
 import 'theme/app_theme.dart';
@@ -50,6 +51,16 @@ class _SonicRelayAppState extends ConsumerState<SonicRelayApp>
     ref
         .read(streamLifecycleControllerProvider)
         .onAppForegroundChanged(inForeground);
+    if (inForeground) {
+      // Coming back to the foreground is the one moment we can be sure the
+      // process is running, so it is the moment to re-check a connection whose
+      // recovery may not have survived being backgrounded: Android freezes a
+      // process with no foreground service, and a pending reconnect `Timer`
+      // does not come back with it. A real outage ended exactly there — the
+      // socket's last retry, then nothing across both a network change and a
+      // foreground resume, until the user restarted the session by hand.
+      ref.read(listenerViewModelProvider.notifier).resume();
+    }
   }
 
   @override

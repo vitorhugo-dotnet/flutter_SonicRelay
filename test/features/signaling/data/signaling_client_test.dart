@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sonic_relay/core/diagnostics/diagnostic_log.dart';
+import 'package:sonic_relay/core/network/network_monitor.dart';
 import 'package:sonic_relay/core/websocket/websocket_client.dart';
 import 'package:sonic_relay/features/device_identity/data/device_credential_storage.dart';
 import 'package:sonic_relay/features/device_identity/data/device_identity_api.dart';
@@ -100,6 +101,18 @@ class ManualTimer implements Timer {
   int get tick => _active ? 0 : 1;
 }
 
+/// A [NetworkMonitor] whose transport changes are pushed by the test.
+class ControllableNetworkMonitor implements NetworkMonitor {
+  final _controller = StreamController<bool>.broadcast();
+
+  @override
+  Stream<bool> get onChanged => _controller.stream;
+
+  void emit(bool online) => _controller.add(online);
+
+  Future<void> close() => _controller.close();
+}
+
 Timer _instantTimer(Duration delay, void Function() callback) =>
     Timer(Duration.zero, callback);
 
@@ -107,6 +120,135 @@ Map<String, Object?> _decode(String raw) =>
     jsonDecode(raw) as Map<String, Object?>;
 
 void main() {
+
+  group('recovery triggers', () {
+    late ControllableNetworkMonitor network;
+    late List<Uri> uris;
+    late List<ManualTimer> timers;
+    late SignalingClient client;
+    late StreamSession recoverySession;
+    late bool failNextConnect;
+
+    setUp(() {
+      network = ControllableNetworkMonitor();
+      uris = [];
+      timers = [];
+      failNextConnect = false;
+      final webSocketClient = WebSocketClient(
+        diagnosticLog: _testLog(),
+        connector: (uri, headers) async {
+          uris.add(uri);
+          if (failNextConnect) throw const SocketException('offline');
+          return FakeWebSocketConnection();
+        },
+        scheduleTimer: (delay, callback) {
+          final timer = ManualTimer(delay, callback);
+          timers.add(timer);
+          return timer;
+        },
+      );
+      client = SignalingClient(
+        webSocketClient: webSocketClient,
+        deviceIdentitySession: MutableDeviceIdentitySession(),
+        diagnosticLog: _testLog(),
+        networkMonitor: network,
+      );
+      recoverySession = StreamSession(
+        sessionId: 'session-9',
+        signalingUrl: Uri.parse('wss://stream.example/ws/signaling'),
+      );
+    });
+
+    tearDown(() async {
+      await client.dispose();
+      await network.close();
+    });
+
+    test('a network becoming available retries a socket sitting on backoff',
+        () async {
+      failNextConnect = true;
+      await client.connect(session: recoverySession);
+      await Future<void>.delayed(Duration.zero);
+      expect(uris, hasLength(1));
+      expect(timers.single.isActive, isTrue, reason: 'backoff is pending');
+
+      failNextConnect = false;
+      network.emit(true);
+      await Future<void>.delayed(Duration.zero);
+
+      expect(uris, hasLength(2),
+          reason: 'the handover must not wait out the backoff');
+      expect(timers.single.isActive, isFalse);
+    });
+
+    test('losing the network does not itself trigger a retry', () async {
+      failNextConnect = true;
+      await client.connect(session: recoverySession);
+      await Future<void>.delayed(Duration.zero);
+
+      network.emit(false);
+      await Future<void>.delayed(Duration.zero);
+
+      expect(uris, hasLength(1));
+    });
+
+    test('a network change is ignored once the viewer has left', () async {
+      failNextConnect = true;
+      await client.connect(session: recoverySession);
+      await Future<void>.delayed(Duration.zero);
+      await client.leave();
+
+      failNextConnect = false;
+      network.emit(true);
+      await Future<void>.delayed(Duration.zero);
+
+      expect(uris, hasLength(1), reason: 'a deliberate leave stays left');
+    });
+
+    test('nudge retries immediately when the socket is down', () async {
+      failNextConnect = true;
+      await client.connect(session: recoverySession);
+      await Future<void>.delayed(Duration.zero);
+
+      failNextConnect = false;
+      client.nudge('app resumed');
+      await Future<void>.delayed(Duration.zero);
+
+      expect(uris, hasLength(2));
+    });
+
+    test('nudge before any session is a no-op', () async {
+      client.nudge('app resumed');
+      await Future<void>.delayed(Duration.zero);
+
+      expect(uris, isEmpty);
+    });
+
+    test('reopen closes and reconnects the socket for the same session',
+        () async {
+      await client.connect(session: recoverySession);
+      await Future<void>.delayed(Duration.zero);
+      expect(uris, hasLength(1));
+
+      await client.reopen();
+      await Future<void>.delayed(Duration.zero);
+
+      expect(uris, hasLength(2));
+      expect(uris.last.queryParameters, {'sessionId': 'session-9'});
+    });
+
+    test('reopen after leaving does not resurrect the socket', () async {
+      await client.connect(session: recoverySession);
+      await Future<void>.delayed(Duration.zero);
+      await client.leave();
+
+      await client.reopen();
+      await Future<void>.delayed(Duration.zero);
+
+      expect(uris, hasLength(1));
+    });
+  });
+
   late List<Uri> requestedUris;
   late List<Map<String, String>> requestedHeaders;
   late FakeWebSocketConnection connection;

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sonic_relay/core/diagnostics/sonic_log.dart';
 import 'package:sonic_relay/core/webrtc/rtc_ice_server_config.dart';
@@ -114,6 +116,167 @@ SignalingMessage _message(
 }
 
 void main() {
+
+  group('viewer.ready offer deadline', () {
+    late FakeRtcPeerConnectionFactory watchdogFactory;
+    late FakeAudioReceiverService watchdogAudio;
+    late WebRtcReceiverService watchdog;
+    late List<OutboundSignal> outbound;
+    late List<_FakeTimer> pending;
+    late int rejoins;
+
+    /// Fires every deadline still armed, mimicking the timeout elapsing
+    /// without an offer arriving. Cancelled deadlines stay silent, which is
+    /// the behavior under test.
+    Future<void> elapse() async {
+      final due = List<_FakeTimer>.from(pending);
+      pending.clear();
+      for (final timer in due) {
+        timer.fire();
+      }
+      await Future<void>.delayed(Duration.zero);
+    }
+
+    setUp(() {
+      watchdogFactory = FakeRtcPeerConnectionFactory();
+      watchdogAudio = FakeAudioReceiverService();
+      pending = [];
+      rejoins = 0;
+      watchdog = WebRtcReceiverService(
+        peerConnectionFactory: watchdogFactory,
+        audioReceiver: watchdogAudio,
+        maxOfferRetries: 2,
+        scheduleTimer: (duration, callback) {
+          final timer = _FakeTimer(callback);
+          pending.add(timer);
+          return timer;
+        },
+      );
+      watchdog.onRejoinRequested = () async => rejoins++;
+      outbound = [];
+      watchdog.outboundSignals.listen(outbound.add);
+    });
+
+    tearDown(() => watchdog.dispose());
+
+    Future<void> announce() async {
+      await watchdog.handleSignal(
+        _message(SignalingMessageType.publisherReady, from: 'publisher-1'),
+      );
+      await Future<void>.delayed(Duration.zero);
+    }
+
+    test('re-sends viewer.ready when no offer arrives in time', () async {
+      await announce();
+      expect(outbound, hasLength(1));
+
+      await elapse();
+
+      expect(outbound, hasLength(2));
+      expect(outbound.last.type, SignalingMessageType.viewerReady);
+      expect(outbound.last.to, 'publisher-1');
+    });
+
+    test('escalates to reopening signaling after the retries are spent',
+        () async {
+      await announce();
+
+      await elapse();
+      await elapse();
+      expect(outbound, hasLength(3), reason: 'initial send plus two retries');
+      expect(rejoins, 0);
+
+      await elapse();
+
+      expect(rejoins, 1);
+      expect(outbound, hasLength(3), reason: 'no further viewer.ready spam');
+    });
+
+    test('stops escalating instead of looping on reopens', () async {
+      await announce();
+      await elapse();
+      await elapse();
+      await elapse();
+      expect(rejoins, 1);
+
+      await elapse();
+
+      expect(rejoins, 1, reason: 'the deadline is not re-armed after a reopen');
+    });
+
+    test('an arriving offer cancels the deadline', () async {
+      await announce();
+
+      await watchdog.handleSignal(
+        _message(
+          SignalingMessageType.webrtcOffer,
+          from: 'publisher-1',
+          payload: const {'sdp': 'offer-sdp', 'type': 'offer'},
+        ),
+      );
+      await Future<void>.delayed(Duration.zero);
+      final afterOffer = outbound.length;
+
+      await elapse();
+
+      expect(outbound, hasLength(afterOffer),
+          reason: 'the answered request must not be retried');
+      expect(rejoins, 0);
+    });
+
+    test('a fresh announcement restarts the retry budget', () async {
+      await announce();
+      await elapse();
+      await elapse();
+      await elapse();
+      expect(rejoins, 1);
+
+      await announce();
+      await elapse();
+      await elapse();
+      expect(rejoins, 1, reason: 'the budget started over');
+
+      await elapse();
+
+      expect(rejoins, 2);
+    });
+
+    test('participant_not_found drops the deadline instead of retrying',
+        () async {
+      await announce();
+      expect(outbound, hasLength(1));
+
+      await watchdog.handleSignal(
+        _message(
+          SignalingMessageType.error,
+          payload: const {'code': 'participant_not_found'},
+        ),
+      );
+      await Future<void>.delayed(Duration.zero);
+      await elapse();
+
+      expect(outbound, hasLength(1),
+          reason: 'a publisher that is not connected cannot answer',
+      );
+      expect(rejoins, 0);
+    });
+
+    test('an unrelated error leaves the deadline armed', () async {
+      await announce();
+
+      await watchdog.handleSignal(
+        _message(
+          SignalingMessageType.error,
+          payload: const {'code': 'invalid_message'},
+        ),
+      );
+      await Future<void>.delayed(Duration.zero);
+      await elapse();
+
+      expect(outbound, hasLength(2));
+    });
+  });
+
   late FakeRtcPeerConnectionFactory factory;
   late FakeAudioReceiverService audio;
   late WebRtcReceiverService service;
@@ -747,4 +910,28 @@ void main() {
       expect(states, isNot(contains(ListenerConnectionState.disconnected)));
     },
   );
+}
+
+/// A [Timer] that only runs when a test fires it, and honours [cancel] — the
+/// deadline being dropped is exactly what several of these tests assert.
+class _FakeTimer implements Timer {
+  _FakeTimer(this._callback);
+
+  final void Function() _callback;
+  bool _active = true;
+
+  void fire() {
+    if (!_active) return;
+    _active = false;
+    _callback();
+  }
+
+  @override
+  void cancel() => _active = false;
+
+  @override
+  bool get isActive => _active;
+
+  @override
+  int get tick => _active ? 0 : 1;
 }
