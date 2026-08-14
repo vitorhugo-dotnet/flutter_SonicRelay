@@ -136,6 +136,19 @@ class RtcInboundAudioStats {
   final int? jitterBufferEmittedCount;
 }
 
+/// Formats the selected ICE candidate pair as `local/remote protocol`, or null
+/// when neither side reported a candidate type. A side that reported no type
+/// shows as `?` rather than dropping out, so the pair stays readable as a pair.
+String? describeCandidatePair({
+  required Object? localType,
+  required Object? remoteType,
+  required Object? protocol,
+}) {
+  if (localType == null && remoteType == null) return null;
+  final pair = '${localType ?? '?'}/${remoteType ?? '?'}';
+  return protocol == null ? pair : '$pair $protocol';
+}
+
 /// Coarse, display-only connection statistics polled from the peer connection.
 /// Carries only numbers and a transport label — never SDP or candidate bodies.
 class RtcConnectionStats {
@@ -143,6 +156,7 @@ class RtcConnectionStats {
     this.rttMs,
     this.jitterMs,
     this.transport = RtcTransportMode.unknown,
+    this.candidatePair,
     this.inboundAudio,
   });
 
@@ -153,6 +167,16 @@ class RtcConnectionStats {
   final double? jitterMs;
 
   final RtcTransportMode transport;
+
+  /// The winning ICE candidate pair as `local/remote` candidate types plus the
+  /// protocol, e.g. `relay/srflx udp`.
+  ///
+  /// [transport] only says relay-or-not, which is not enough to explain *why*
+  /// a session relayed: `srflx/relay` (one side's direct path never worked) and
+  /// `relay/relay` (neither did) point at different networks. Candidate types
+  /// and protocol are metadata — no addresses, no SDP — so they are safe to
+  /// keep in an exportable log.
+  final String? candidatePair;
 
   /// Cumulative inbound audio counters, when the platform reports them.
   final RtcInboundAudioStats? inboundAudio;
@@ -474,21 +498,27 @@ class _FlutterWebRtcPeerConnection implements RtcPeerConnection {
 
       double? rttMs;
       var transport = RtcTransportMode.unknown;
+      String? candidatePair;
       if (selectedPair != null) {
         final rtt =
             selectedPair['currentRoundTripTime'] ??
             selectedPair['roundTripTime'];
         if (rtt is num) rttMs = rtt.toDouble() * 1000;
 
-        final localType =
-            candidates[selectedPair['localCandidateId']]?['candidateType'];
-        final remoteType =
-            candidates[selectedPair['remoteCandidateId']]?['candidateType'];
+        final local = candidates[selectedPair['localCandidateId']];
+        final remote = candidates[selectedPair['remoteCandidateId']];
+        final localType = local?['candidateType'];
+        final remoteType = remote?['candidateType'];
         if (localType == 'relay' || remoteType == 'relay') {
           transport = RtcTransportMode.relay;
         } else if (localType != null || remoteType != null) {
           transport = RtcTransportMode.direct;
         }
+        candidatePair = describeCandidatePair(
+          localType: localType,
+          remoteType: remoteType,
+          protocol: local?['protocol'] ?? remote?['protocol'],
+        );
       }
 
       if (rttMs == null &&
@@ -501,6 +531,7 @@ class _FlutterWebRtcPeerConnection implements RtcPeerConnection {
         rttMs: rttMs,
         jitterMs: jitterMs,
         transport: transport,
+        candidatePair: candidatePair,
         inboundAudio: inboundAudio,
       );
     } catch (_) {

@@ -60,6 +60,11 @@ Pairing and session join are intentionally distinct:
 - `features/signaling/SignalingClient` connects with only `sessionId` in the
   query and marks `DeviceIdentitySessionInvalidatedException` permanent, so a
   revoked credential cannot create a reconnect loop.
+- Backoff alone is not enough on a phone, so two outside signals short-circuit
+  it via `WebSocketClient.retryNow`: a transport handover reported by
+  `core/network/NetworkMonitor`, and the app returning to the foreground. Both
+  reset the delay to its start — a wait chosen while the device had no route at
+  all says nothing about a device that now has one.
 - `features/listener/data/WebRtcReceiverService` is signaling-agnostic and owns
   the receive-only peer connection.
 - `features/listener/presentation/ListenerViewModel` bridges signaling messages,

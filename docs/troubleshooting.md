@@ -66,17 +66,30 @@ GET /ws/signaling?sessionId={sessionId}
 Authorization: Bearer <device_access_token>
 ```
 
-Network and temporary token failures reconnect with exponential backoff. A
-revoked device produces `DeviceIdentitySessionInvalidatedException`, which is a
-permanent failure: no further timer is scheduled and the router sends even an
-active listener to `/device-setup`.
+Network and temporary token failures reconnect with exponential backoff, capped
+at 30s. A revoked device produces `DeviceIdentitySessionInvalidatedException`,
+which is a permanent failure: no further timer is scheduled and the router sends
+even an active listener to `/device-setup`.
+
+Two events cut the pending backoff short and retry immediately: the device
+gaining a network transport (`network changed online=true` in the diagnostic
+log), and the app being resumed. Each attempt is also bounded by a 15s connect
+timeout, so a half-open network cannot leave an attempt pending forever with no
+timer left to recover it.
 
 ## Viewer waits for the publisher
 
 `viewer.ready` is not sent on socket open. The publisher first sends
 `publisher.ready` to the viewer participant; Flutter replies `viewer.ready` to
-that message's authenticated `from` participant. If no offer follows, confirm
-the Windows publisher remains online and the session is active.
+that message's authenticated `from` participant.
+
+Every `viewer.ready` carries a deadline. If no `webrtc.offer` answers it within
+10s it is re-sent, up to three times, and then the signaling socket is reopened
+so the backend re-announces this viewer from scratch. After that the viewer
+stays in `reconnecting` and waits to be announced to again rather than looping —
+a publisher that is simply gone cannot be nudged. A `participant_not_found`
+error frame drops the deadline for the same reason. If it never recovers,
+confirm the Windows publisher remains online and the session is active.
 
 ## Signaling error frames
 

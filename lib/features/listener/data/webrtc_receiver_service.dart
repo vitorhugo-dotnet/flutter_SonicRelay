@@ -33,12 +33,18 @@ class WebRtcReceiverService {
     Future<RtcIceServerConfig> Function()? iceServersResolver,
     bool Function()? forceRelay,
     Duration statsInterval = const Duration(seconds: 2),
+    Duration offerTimeout = const Duration(seconds: 10),
+    int maxOfferRetries = 3,
+    Timer Function(Duration, void Function())? scheduleTimer,
   }) : _peerConnectionFactory = peerConnectionFactory,
        _audioReceiver = audioReceiver,
        _iceServers = iceServers ?? RtcIceServerConfig.defaults(),
        _iceServersResolver = iceServersResolver,
        _forceRelay = forceRelay,
-       _statsInterval = statsInterval;
+       _statsInterval = statsInterval,
+       _offerTimeout = offerTimeout,
+       _maxOfferRetries = maxOfferRetries,
+       _scheduleTimer = scheduleTimer ?? Timer.new;
 
   final RtcPeerConnectionFactory _peerConnectionFactory;
   final AudioReceiverService _audioReceiver;
@@ -55,6 +61,27 @@ class WebRtcReceiverService {
   final bool Function()? _forceRelay;
   final Duration _statsInterval;
   Timer? _statsTimer;
+
+  /// How long an announced `viewer.ready` may go unanswered before it is
+  /// re-sent, and how many times to re-send before escalating.
+  ///
+  /// `viewer.ready` is the only way this side can ask for a new offer — a
+  /// receive-only answerer cannot restart ICE itself — and it used to be sent
+  /// once, with no deadline attached. When the publisher did not answer, the
+  /// viewer waited on an offer that was never coming: in one real outage five
+  /// separate `viewer.ready` messages (including three the user sent by hand
+  /// from the notification) drew no reply at all, and the stream sat dead for
+  /// twelve minutes until the background reconnect window gave up on it.
+  final Duration _offerTimeout;
+  final int _maxOfferRetries;
+  final Timer Function(Duration, void Function()) _scheduleTimer;
+  Timer? _offerWaitTimer;
+  int _offerAttempts = 0;
+
+  /// Invoked once re-sending `viewer.ready` has stopped helping, to reopen the
+  /// signaling socket so the backend re-announces this viewer from scratch.
+  /// Wired by the view model, which owns the signaling client.
+  Future<void> Function()? onRejoinRequested;
 
   final _connectionStateController =
       StreamController<ListenerConnectionState>.broadcast();
@@ -94,7 +121,7 @@ class WebRtcReceiverService {
         // cannot see. Our own join carries no `from`, so it is ignored.
         if (message.from != null && message.payload['role'] == 'publisher') {
           _publisherId = message.from;
-          _emit(SignalingMessageType.viewerReady, const {}, to: message.from);
+          _announceReady(message.from!, 'session.joined');
         }
         if (_state == ListenerConnectionState.idle) {
           _setState(ListenerConnectionState.waitingForOffer);
@@ -106,7 +133,9 @@ class WebRtcReceiverService {
         // routed message and the backend rejects it without a `to` recipient.
         sonicLog('WebRTC', 'publisher.ready from=${message.from} -> viewer.ready');
         _publisherId = message.from;
-        _emit(SignalingMessageType.viewerReady, const {}, to: message.from);
+        if (message.from != null) {
+          _announceReady(message.from!, 'publisher.ready');
+        }
         if (_state == ListenerConnectionState.idle) {
           _setState(ListenerConnectionState.waitingForOffer);
         }
@@ -130,7 +159,22 @@ class WebRtcReceiverService {
             'WebRTC',
             'participant.reconnected from=${message.from} -> viewer.ready',
           );
-          _emit(SignalingMessageType.viewerReady, const {}, to: message.from);
+          _announceReady(message.from!, 'participant.reconnected');
+        }
+      case SignalingMessageType.error:
+        // Every routed message this side sends is addressed to the publisher,
+        // so `participant_not_found` can only mean the publisher's socket is
+        // not currently up. Re-sending `viewer.ready` at it cannot help, and
+        // escalating to a socket reopen would be chasing our own tail. Drop the
+        // deadline and stay in `reconnecting`: the publisher coming back
+        // announces itself, which starts a fresh cycle.
+        if (message.payload['code'] == 'participant_not_found') {
+          sonicLog(
+            'WebRTC',
+            'publisher not connected (participant_not_found) -> waiting for it '
+                'to announce itself',
+          );
+          _cancelOfferDeadline();
         }
       case SignalingMessageType.participantDisconnected:
         // Transient — the backend's grace period is running. The peer
@@ -141,8 +185,66 @@ class WebRtcReceiverService {
     }
   }
 
+  /// Sends `viewer.ready` to [publisherId] and starts a deadline for the offer
+  /// it is supposed to trigger. Every path that asks the publisher to (re)offer
+  /// goes through here, so none of them can wait forever.
+  ///
+  /// [reason] is only for the diagnostic log, which previously showed a run of
+  /// identical `viewer.ready` sends with no way to tell which trigger produced
+  /// each one.
+  void _announceReady(String publisherId, String reason) {
+    _offerAttempts = 0;
+    _emit(SignalingMessageType.viewerReady, const {}, to: publisherId);
+    _armOfferDeadline(publisherId, reason);
+  }
+
+  void _armOfferDeadline(String publisherId, String reason) {
+    _offerWaitTimer?.cancel();
+    _offerWaitTimer = _scheduleTimer(_offerTimeout, () {
+      _offerWaitTimer = null;
+      // A peer connection that came up on its own in the meantime means the
+      // publisher answered after all; nothing left to chase.
+      if (_state == ListenerConnectionState.connected) return;
+      if (_publisherId != publisherId) return;
+
+      if (_offerAttempts < _maxOfferRetries) {
+        _offerAttempts++;
+        sonicLog(
+          'WebRTC',
+          'no offer ${_offerTimeout.inSeconds}s after viewer.ready ($reason) '
+              '-> retry $_offerAttempts/$_maxOfferRetries',
+        );
+        _emit(SignalingMessageType.viewerReady, const {}, to: publisherId);
+        _armOfferDeadline(publisherId, reason);
+        return;
+      }
+
+      final rejoin = onRejoinRequested;
+      if (rejoin == null) return;
+      // Re-sending stopped helping, so the socket itself is the suspect: reopen
+      // it and let the backend re-announce this viewer to the publisher. The
+      // deadline is deliberately not re-armed here — the reopened socket's own
+      // `session.joined`/`publisher.ready` starts a fresh cycle, and looping on
+      // reopens would spam a publisher that is simply gone. Until it comes
+      // back, staying in `reconnecting` is the honest state.
+      sonicLog(
+        'WebRTC',
+        'publisher never answered $_maxOfferRetries viewer.ready retries '
+            '-> reopening signaling',
+      );
+      unawaited(rejoin());
+    });
+  }
+
+  void _cancelOfferDeadline() {
+    _offerWaitTimer?.cancel();
+    _offerWaitTimer = null;
+    _offerAttempts = 0;
+  }
+
   Future<void> _handleOffer(SignalingMessage message) async {
     _publisherId = message.from;
+    _cancelOfferDeadline();
     sonicLog('WebRTC', 'offer received from=${message.from} -> negotiating');
     try {
       // Renegotiate cleanly if an offer arrives while a connection exists.
@@ -248,7 +350,7 @@ class WebRtcReceiverService {
           _setStats(_stats.copyWith(iceState: 'Reconnecting'));
           _setState(ListenerConnectionState.reconnecting);
           unawaited(_disposePeerConnection());
-          _emit(SignalingMessageType.viewerReady, const {}, to: publisher);
+          _announceReady(publisher, 'ice failed');
         } else {
           _setStats(_stats.copyWith(iceState: 'Failed'));
           _setState(ListenerConnectionState.failed);
@@ -322,7 +424,15 @@ class WebRtcReceiverService {
     // or when a relay-only preference is not behaving as expected.
     if (stats.transport != RtcTransportMode.unknown &&
         stats.transport != _stats.transport) {
-      sonicLog('WebRTC', 'media path -> ${stats.transport.name}');
+      // The candidate types come along because "relay" alone never explained
+      // itself: it does not say whether the direct path was tried and lost, or
+      // whether only one side could offer one.
+      final pair = stats.candidatePair;
+      sonicLog(
+        'WebRTC',
+        'media path -> ${stats.transport.name}'
+            '${pair == null ? '' : ' (candidate pair $pair)'}',
+      );
     }
 
     _setStats(
@@ -407,6 +517,7 @@ class WebRtcReceiverService {
 
   Future<void> _teardown(ListenerConnectionState finalState) async {
     _stopStatsPolling();
+    _cancelOfferDeadline();
     await _disposePeerConnection();
     _pendingRemoteCandidates.clear();
     await _audioReceiver.stop();
@@ -427,7 +538,7 @@ class WebRtcReceiverService {
     final publisher = _publisherId;
     if (publisher == null) return;
     sonicLog('WebRTC', 'manual reconnect -> viewer.ready to=$publisher');
-    _emit(SignalingMessageType.viewerReady, const {}, to: publisher);
+    _announceReady(publisher, 'manual reconnect');
   }
 
   /// Tears down the active peer connection and audio when the viewer leaves,
@@ -437,6 +548,7 @@ class WebRtcReceiverService {
   /// Tears down the peer connection and audio and releases all streams.
   Future<void> dispose() async {
     _stopStatsPolling();
+    _cancelOfferDeadline();
     await _disposePeerConnection();
     await _audioReceiver.stop();
     await _connectionStateController.close();

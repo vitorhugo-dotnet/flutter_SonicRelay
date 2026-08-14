@@ -708,4 +708,169 @@ void main() {
       await sub.cancel();
     });
   });
+
+  group('retryNow', () {
+    test('abandons a pending backoff and reconnects immediately', () async {
+      final timers = <ManualTimer>[];
+      var attempts = 0;
+      final client = WebSocketClient(
+        diagnosticLog: _testLog(),
+        connector: (uri, headers) async {
+          attempts++;
+          if (attempts == 1) throw const SocketException('no route to host');
+          return FakeWebSocketConnection();
+        },
+        scheduleTimer: (delay, callback) {
+          final timer = ManualTimer(delay, callback);
+          timers.add(timer);
+          return timer;
+        },
+      );
+      addTearDown(client.dispose);
+
+      await client.connect(Uri.parse('wss://example.test/ws'));
+      await Future<void>.delayed(Duration.zero);
+      expect(attempts, 1);
+      expect(timers.single.isActive, isTrue);
+
+      client.retryNow('network available');
+      await Future<void>.delayed(Duration.zero);
+
+      expect(attempts, 2, reason: 'the retry must not wait for the backoff');
+      expect(timers.single.isActive, isFalse, reason: 'backoff was cancelled');
+      expect(client.isConnected, isTrue);
+    });
+
+    test('resets the backoff so the next delay starts from the beginning',
+        () async {
+      final timers = <ManualTimer>[];
+      final client = WebSocketClient(
+        diagnosticLog: _testLog(),
+        reconnectPolicy: const ReconnectPolicy(
+          initialDelay: Duration(seconds: 1),
+          maxDelay: Duration(seconds: 30),
+          jitterRatio: 0,
+        ),
+        connector: (uri, headers) async =>
+            throw const SocketException('offline'),
+        scheduleTimer: (delay, callback) {
+          final timer = ManualTimer(delay, callback);
+          timers.add(timer);
+          return timer;
+        },
+      );
+      addTearDown(client.dispose);
+
+      await client.connect(Uri.parse('wss://example.test/ws'));
+      await Future<void>.delayed(Duration.zero);
+      // Climb the backoff: 1s, 2s, 4s.
+      for (var i = 0; i < 2; i++) {
+        timers.last.fire();
+        await Future<void>.delayed(Duration.zero);
+      }
+      expect(timers.map((timer) => timer.delay), [
+        const Duration(seconds: 1),
+        const Duration(seconds: 2),
+        const Duration(seconds: 4),
+      ]);
+
+      client.retryNow('app resumed');
+      await Future<void>.delayed(Duration.zero);
+
+      expect(timers.last.delay, const Duration(seconds: 1),
+          reason: 'a handover invalidates the delay chosen while offline');
+    });
+
+    test('is a no-op while connected', () async {
+      var attempts = 0;
+      final client = WebSocketClient(
+        diagnosticLog: _testLog(),
+        connector: (uri, headers) async {
+          attempts++;
+          return FakeWebSocketConnection();
+        },
+        scheduleTimer: _instantTimer,
+      );
+      addTearDown(client.dispose);
+
+      await client.connect(Uri.parse('wss://example.test/ws'));
+      await Future<void>.delayed(Duration.zero);
+      client.retryNow('network available');
+      await Future<void>.delayed(Duration.zero);
+
+      expect(attempts, 1);
+    });
+
+    test('is a no-op after an explicit disconnect', () async {
+      var attempts = 0;
+      final client = WebSocketClient(
+        diagnosticLog: _testLog(),
+        connector: (uri, headers) async {
+          attempts++;
+          return FakeWebSocketConnection();
+        },
+        scheduleTimer: _instantTimer,
+      );
+      addTearDown(client.dispose);
+
+      await client.connect(Uri.parse('wss://example.test/ws'));
+      await client.disconnect();
+      client.retryNow('app resumed');
+      await Future<void>.delayed(Duration.zero);
+
+      expect(attempts, 1, reason: 'a deliberate leave must stay left');
+    });
+
+    test('is a no-op before any connect', () async {
+      var attempts = 0;
+      final client = WebSocketClient(
+        diagnosticLog: _testLog(),
+        connector: (uri, headers) async {
+          attempts++;
+          return FakeWebSocketConnection();
+        },
+        scheduleTimer: _instantTimer,
+      );
+      addTearDown(client.dispose);
+
+      client.retryNow('app resumed');
+      await Future<void>.delayed(Duration.zero);
+
+      expect(attempts, 0);
+    });
+
+    test('does not start a second attempt alongside one already in flight',
+        () async {
+      final gate = Completer<void>();
+      var attempts = 0;
+      final client = WebSocketClient(
+        diagnosticLog: _testLog(),
+        connector: (uri, headers) async {
+          attempts++;
+          if (attempts == 1) {
+            await gate.future;
+            throw const SocketException('timed out');
+          }
+          return FakeWebSocketConnection();
+        },
+        scheduleTimer: _instantTimer,
+      );
+      addTearDown(client.dispose);
+
+      unawaited(client.connect(Uri.parse('wss://example.test/ws')));
+      await Future<void>.delayed(Duration.zero);
+      expect(attempts, 1);
+
+      client.retryNow('network available');
+      await Future<void>.delayed(Duration.zero);
+      expect(attempts, 1, reason: 'the in-flight attempt owns the slot');
+
+      gate.complete();
+      await Future<void>.delayed(Duration.zero);
+      await Future<void>.delayed(Duration.zero);
+
+      expect(attempts, 2, reason: 'the reset backoff retried straight after');
+      expect(client.isConnected, isTrue);
+    });
+  });
 }

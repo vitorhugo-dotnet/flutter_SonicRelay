@@ -54,11 +54,24 @@ typedef WebSocketReconnectPredicate = bool Function(Object error);
 /// 20s keeps a missed ping well inside the shortest window we know of.
 const signalingPingInterval = Duration(seconds: 20);
 
+/// How long a single connect attempt may take before it is abandoned.
+///
+/// `WebSocket.connect` has no timeout of its own, so a half-open network — the
+/// normal state of a phone that has just left Wi-Fi, where the old route is
+/// gone but packets vanish instead of being refused — can leave an attempt
+/// pending indefinitely. That attempt never returns, so it never schedules the
+/// next retry, and the client is wedged with no timer left to recover it.
+/// Bounding the attempt keeps the reconnect chain alive.
+const signalingConnectTimeout = Duration(seconds: 15);
+
 Future<WebSocketConnection> ioWebSocketConnector(
   Uri uri,
   Map<String, String> headers,
 ) async {
-  final socket = await WebSocket.connect(uri.toString(), headers: headers);
+  final socket = await WebSocket.connect(
+    uri.toString(),
+    headers: headers,
+  ).timeout(signalingConnectTimeout);
   socket.pingInterval = signalingPingInterval;
   return IoWebSocketConnection(socket);
 }
@@ -165,6 +178,13 @@ class WebSocketClient {
   WebSocketConnection? _connection;
   StreamSubscription<dynamic>? _subscription;
   Timer? _reconnectTimer;
+
+  /// Generation of the attempt currently between its start and its
+  /// success/failure, so [retryNow] never races a second attempt against one
+  /// already in flight. Tracked per generation rather than as a plain flag
+  /// because a superseded attempt can finish after its replacement started,
+  /// and must not clear the replacement's mark on its way out.
+  int? _inFlightGeneration;
   int _attempt = 0;
   int _generation = 0;
   bool _stopped = true;
@@ -205,11 +225,40 @@ class WebSocketClient {
     await _attemptConnect(generation);
   }
 
+  /// Abandons any pending backoff and retries straight away, resetting the
+  /// delay sequence back to its start.
+  ///
+  /// Called when something outside the transport knows the odds have just
+  /// changed — a network handover completed, or the user brought the app back
+  /// to the foreground. Waiting out a 30-second backoff that was scheduled
+  /// while the device had no route at all is pure dead time once it does.
+  ///
+  /// No-op while connected, after [disconnect], or before the first [connect]:
+  /// there is nothing to retry in any of those states.
+  void retryNow(String reason) {
+    if (_stopped || _uri == null || _connection != null) return;
+    _reconnectTimer?.cancel();
+    _reconnectTimer = null;
+    _attempt = 0;
+    unawaited(
+      _diagnosticLog.write('WebSocket', 'immediate reconnect ($reason)'),
+    );
+    // An attempt already running will either succeed or fall through to
+    // _scheduleReconnect, which now reads the reset counter and retries after
+    // the initial delay instead of the capped one.
+    if (_inFlightGeneration == _generation) return;
+    unawaited(_attemptConnect(_generation));
+  }
+
+  /// Whether a transport connection is currently open.
+  bool get isConnected => _connection != null;
+
   Future<void> _attemptConnect(int generation) async {
     if (!_isCurrent(generation)) return;
     if (_attempt == 0) {
       _stateController.add(WebSocketConnectionState.connecting);
     }
+    _inFlightGeneration = generation;
     try {
       final uri = _uri!;
       final isReconnect = _attempt > 0;
@@ -267,6 +316,8 @@ class WebSocketClient {
         return;
       }
       _scheduleReconnect(generation);
+    } finally {
+      if (_inFlightGeneration == generation) _inFlightGeneration = null;
     }
   }
 

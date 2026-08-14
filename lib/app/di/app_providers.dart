@@ -8,6 +8,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import '../../core/diagnostics/diagnostic_log.dart';
 import '../../core/http/auth_interceptor.dart';
 import '../../core/http/dio_client.dart';
+import '../../core/network/network_monitor.dart';
 import '../../core/storage/background_playback_storage.dart';
 import '../../core/storage/coturn_override_storage.dart';
 import '../../core/storage/relay_mode_storage.dart';
@@ -478,11 +479,23 @@ final webSocketClientProvider = Provider<WebSocketClient>(
   ),
 );
 
+/// Watches the device's network transports so a Wi-Fi/cellular handover can
+/// retry signaling immediately instead of waiting out a backoff scheduled while
+/// there was no route at all. Only Android and iOS have a plugin behind
+/// `connectivity_plus` here; everything else (including tests) keeps the plain
+/// backoff.
+final networkMonitorProvider = Provider<NetworkMonitor>(
+  (ref) => Platform.isAndroid || Platform.isIOS
+      ? ConnectivityNetworkMonitor()
+      : const NoopNetworkMonitor(),
+);
+
 final signalingClientProvider = Provider<SignalingClient>(
   (ref) => SignalingClient(
     webSocketClient: ref.watch(webSocketClientProvider),
     deviceIdentitySession: ref.watch(deviceIdentitySessionProvider),
     diagnosticLog: ref.watch(diagnosticLogProvider),
+    networkMonitor: ref.watch(networkMonitorProvider),
   ),
 );
 
