@@ -12,6 +12,9 @@ enum SignalingStatus {
   connecting,
   connected,
   reconnecting,
+
+  /// The device has no usable transport; signaling is parked, not retrying.
+  waitingForNetwork,
   ended,
   disconnected,
   error,
@@ -84,6 +87,8 @@ class SignalingStatusViewModel extends Notifier<SignalingStatusState> {
     SignalingConnectionState.connecting => SignalingStatus.connecting,
     SignalingConnectionState.connected => SignalingStatus.connected,
     SignalingConnectionState.reconnecting => SignalingStatus.reconnecting,
+    SignalingConnectionState.waitingForNetwork =>
+      SignalingStatus.waitingForNetwork,
     SignalingConnectionState.ended => SignalingStatus.ended,
     SignalingConnectionState.disconnected => SignalingStatus.disconnected,
   };

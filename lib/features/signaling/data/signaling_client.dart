@@ -15,6 +15,11 @@ enum SignalingConnectionState {
   connecting,
   connected,
   reconnecting,
+
+  /// The device has no usable transport, so signaling is parked rather than
+  /// retried. Distinct from [reconnecting] on purpose: nothing is being retried
+  /// and the cause is the device, not the backend.
+  waitingForNetwork,
   ended,
   disconnected,
 }
@@ -32,11 +37,15 @@ class SignalingClient {
     required DiagnosticLog diagnosticLog,
     SignalingMessageMapper mapper = const SignalingMessageMapper(),
     NetworkMonitor networkMonitor = const NoopNetworkMonitor(),
+    Duration networkStabilizationDelay = defaultNetworkStabilizationDelay,
+    Timer Function(Duration delay, void Function() callback)? scheduleTimer,
     Random? random,
   }) : _webSocketClient = webSocketClient,
        _deviceIdentitySession = deviceIdentitySession,
        _diagnosticLog = diagnosticLog,
        _mapper = mapper,
+       _networkStabilizationDelay = networkStabilizationDelay,
+       _scheduleTimer = scheduleTimer ?? Timer.new,
        _random = random ?? Random() {
     _connectionSubscription = _webSocketClient.connectionState.listen(
       _handleTransportState,
@@ -49,7 +58,21 @@ class SignalingClient {
   final DeviceIdentitySession _deviceIdentitySession;
   final DiagnosticLog _diagnosticLog;
   final SignalingMessageMapper _mapper;
+  final Duration _networkStabilizationDelay;
+  final Timer Function(Duration delay, void Function() callback) _scheduleTimer;
   final Random _random;
+
+  /// How long to let freshly-reported transports settle before retrying.
+  ///
+  /// An interface reports itself usable the moment it has an address, which is
+  /// routinely before it can complete a TLS handshake; and a Wi-Fi-to-cellular
+  /// handover reports several transitions in a row, the early ones naming a
+  /// route that is already gone. Retrying on each of those spends attempts on
+  /// interfaces that never had a chance and buries the one real attempt in a
+  /// run of identical-looking failures.
+  static const defaultNetworkStabilizationDelay = Duration(milliseconds: 750);
+
+  Timer? _networkStabilizationTimer;
 
   final _connectionStateController =
       StreamController<SignalingConnectionState>.broadcast();
@@ -104,12 +127,23 @@ class SignalingClient {
   /// A transport handover (Wi-Fi dropped, cellular came up) invalidates
   /// whatever backoff the socket was sitting on: the delay was chosen while
   /// the device had no route, and the device now has one.
+  ///
+  /// The retry is debounced by [defaultNetworkStabilizationDelay] rather than
+  /// fired on the spot. Every transition restarts the window, so a handover that
+  /// reports Wi-Fi-down/cellular-up/Wi-Fi-up in quick succession produces one
+  /// retry against the transports the device actually settled on, not three
+  /// against interfaces that were already gone.
   void _handleNetworkChange(bool online) {
     unawaited(
       _diagnosticLog.write('Signaling', 'network changed online=$online'),
     );
+    _networkStabilizationTimer?.cancel();
+    _networkStabilizationTimer = null;
     if (!online) return;
-    nudge('network available');
+    _networkStabilizationTimer = _scheduleTimer(_networkStabilizationDelay, () {
+      _networkStabilizationTimer = null;
+      nudge('network available');
+    });
   }
 
   /// Retries the signaling socket immediately if it is down, ignoring any
@@ -155,6 +189,10 @@ class SignalingClient {
         _connectionStateController.add(SignalingConnectionState.connected);
       case WebSocketConnectionState.reconnecting:
         _connectionStateController.add(SignalingConnectionState.reconnecting);
+      case WebSocketConnectionState.waitingForNetwork:
+        _connectionStateController.add(
+          SignalingConnectionState.waitingForNetwork,
+        );
       case WebSocketConnectionState.disconnected:
         _connectionStateController.add(SignalingConnectionState.disconnected);
     }
@@ -244,6 +282,8 @@ class SignalingClient {
       ),
     );
     _leaving = true;
+    _networkStabilizationTimer?.cancel();
+    _networkStabilizationTimer = null;
     await _webSocketClient.disconnect();
   }
 
@@ -251,6 +291,8 @@ class SignalingClient {
 
   Future<void> dispose() async {
     _leaving = true;
+    _networkStabilizationTimer?.cancel();
+    _networkStabilizationTimer = null;
     await _networkSubscription.cancel();
     await _connectionSubscription.cancel();
     await _messageSubscription.cancel();

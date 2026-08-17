@@ -873,4 +873,159 @@ void main() {
       expect(client.isConnected, isTrue);
     });
   });
+  group('network gate', () {
+    test('parks in waitingForNetwork instead of spending backoff attempts',
+        () async {
+      final timers = <ManualTimer>[];
+      var online = true;
+      final states = <WebSocketConnectionState>[];
+      final client = WebSocketClient(
+        diagnosticLog: _testLog(),
+        reconnectPolicy: const ReconnectPolicy(
+          initialDelay: Duration(seconds: 1),
+          maxDelay: Duration(seconds: 30),
+          jitterRatio: 0,
+        ),
+        connector: (uri, headers) async =>
+            throw const SocketException('offline'),
+        isNetworkAvailable: () => online,
+        scheduleTimer: (delay, callback) {
+          final timer = ManualTimer(delay, callback);
+          timers.add(timer);
+          return timer;
+        },
+      );
+      addTearDown(client.dispose);
+      client.connectionState.listen(states.add);
+
+      online = false;
+      await client.connect(Uri.parse('wss://example.test/ws'));
+      await Future<void>.delayed(Duration.zero);
+
+      expect(states, contains(WebSocketConnectionState.waitingForNetwork));
+      // The only timer scheduled is the long safety re-check, never a backoff step:
+      // an attempt against a device with no route says nothing about the backend, so
+      // spending the budget there is what leaves a viewer stuck at the capped delay
+      // with the network already back.
+      expect(timers.map((timer) => timer.delay),
+          [const Duration(seconds: 30)]);
+    });
+
+    test('resumes from the first backoff step once the network returns',
+        () async {
+      final timers = <ManualTimer>[];
+      var online = true;
+      final client = WebSocketClient(
+        diagnosticLog: _testLog(),
+        reconnectPolicy: const ReconnectPolicy(
+          initialDelay: Duration(seconds: 1),
+          maxDelay: Duration(seconds: 30),
+          jitterRatio: 0,
+        ),
+        connector: (uri, headers) async =>
+            throw const SocketException('offline'),
+        isNetworkAvailable: () => online,
+        scheduleTimer: (delay, callback) {
+          final timer = ManualTimer(delay, callback);
+          timers.add(timer);
+          return timer;
+        },
+      );
+      addTearDown(client.dispose);
+
+      await client.connect(Uri.parse('wss://example.test/ws'));
+      await Future<void>.delayed(Duration.zero);
+      // Climb the backoff against a live network: 1s, 2s, 4s.
+      for (var i = 0; i < 2; i++) {
+        timers.last.fire();
+        await Future<void>.delayed(Duration.zero);
+      }
+      expect(timers.map((timer) => timer.delay), [
+        const Duration(seconds: 1),
+        const Duration(seconds: 2),
+        const Duration(seconds: 4),
+      ]);
+
+      online = false;
+      timers.last.fire();
+      await Future<void>.delayed(Duration.zero);
+      online = true;
+      client.retryNow('network restored');
+      await Future<void>.delayed(Duration.zero);
+
+      // Back to the first step: a device that just regained a route is a new
+      // situation, not the continuation of an escalating failure against a live one.
+      expect(timers.last.delay, const Duration(seconds: 1));
+    });
+
+    test('a safety re-check reconnects even if no restore signal ever arrives',
+        () async {
+      final timers = <ManualTimer>[];
+      var online = false;
+      var attempts = 0;
+      final client = WebSocketClient(
+        diagnosticLog: _testLog(),
+        connector: (uri, headers) async {
+          attempts++;
+          if (!online) throw const SocketException('offline');
+          return FakeWebSocketConnection();
+        },
+        isNetworkAvailable: () => online,
+        scheduleTimer: (delay, callback) {
+          final timer = ManualTimer(delay, callback);
+          timers.add(timer);
+          return timer;
+        },
+      );
+      addTearDown(client.dispose);
+
+      await client.connect(Uri.parse('wss://example.test/ws'));
+      await Future<void>.delayed(Duration.zero);
+      // The caller's own connect still runs — it is a user action, and failing it
+      // outright is more useful than silently parking. Only the retries after it are
+      // gated, so nothing further is attempted while the device stays offline.
+      expect(attempts, 1);
+
+      // connectivity_plus can miss a transition, and a frozen process loses its
+      // pending timers outright. Parking forever on a probe that is merely wrong is
+      // a worse failure than the burned budget this gate exists to prevent.
+      online = true;
+      timers.last.fire();
+      await Future<void>.delayed(Duration.zero);
+
+      expect(attempts, 2);
+      expect(client.isConnected, isTrue);
+    });
+
+    test('an available network keeps the plain backoff behaviour', () async {
+      final timers = <ManualTimer>[];
+      final client = WebSocketClient(
+        diagnosticLog: _testLog(),
+        reconnectPolicy: const ReconnectPolicy(
+          initialDelay: Duration(seconds: 1),
+          maxDelay: Duration(seconds: 30),
+          jitterRatio: 0,
+        ),
+        connector: (uri, headers) async =>
+            throw const SocketException('refused'),
+        isNetworkAvailable: () => true,
+        scheduleTimer: (delay, callback) {
+          final timer = ManualTimer(delay, callback);
+          timers.add(timer);
+          return timer;
+        },
+      );
+      addTearDown(client.dispose);
+
+      await client.connect(Uri.parse('wss://example.test/ws'));
+      await Future<void>.delayed(Duration.zero);
+      timers.last.fire();
+      await Future<void>.delayed(Duration.zero);
+
+      // A refused connection over a working interface is real evidence about the
+      // backend, so it still costs an attempt.
+      expect(timers.map((timer) => timer.delay),
+          [const Duration(seconds: 1), const Duration(seconds: 2)]);
+    });
+  });
 }

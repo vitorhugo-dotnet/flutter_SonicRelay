@@ -101,6 +101,10 @@ class ListenerPage extends ConsumerWidget {
     ListenerConnectionState.waitingForOffer => 'Waiting for publisher',
     ListenerConnectionState.negotiating => 'Negotiating',
     ListenerConnectionState.connecting => 'Connecting',
+    // Not "Listening": the path is up but nothing is coming through it yet, and
+    // saying otherwise is the difference between a user waiting a moment and a
+    // user checking whether their speaker is broken.
+    ListenerConnectionState.waitingForMedia => 'Waiting for audio',
     ListenerConnectionState.connected => 'Listening',
     ListenerConnectionState.reconnecting => 'Reconnecting',
     ListenerConnectionState.failed => 'Connection failed',
@@ -114,6 +118,7 @@ class ListenerPage extends ConsumerWidget {
         ListenerConnectionState.waitingForOffer ||
         ListenerConnectionState.negotiating ||
         ListenerConnectionState.connecting ||
+        ListenerConnectionState.waitingForMedia ||
         ListenerConnectionState.reconnecting => ConnectionStatus.connecting,
         ListenerConnectionState.idle ||
         ListenerConnectionState.failed ||
@@ -126,6 +131,10 @@ class ListenerPage extends ConsumerWidget {
     SignalingConnectionState.connecting => 'Connecting',
     SignalingConnectionState.connected => 'Connected',
     SignalingConnectionState.reconnecting => 'Reconnecting',
+    // Not "Reconnecting": nothing is being retried, and naming the backend as
+    // the suspect sends the user looking in the wrong place for a phone that
+    // simply has no signal.
+    SignalingConnectionState.waitingForNetwork => 'Offline',
     SignalingConnectionState.ended => 'Ended',
     SignalingConnectionState.disconnected => 'Disconnected',
   };
@@ -134,7 +143,8 @@ class ListenerPage extends ConsumerWidget {
       switch (state) {
         SignalingConnectionState.connected => ConnectionStatus.connected,
         SignalingConnectionState.connecting ||
-        SignalingConnectionState.reconnecting => ConnectionStatus.connecting,
+        SignalingConnectionState.reconnecting ||
+        SignalingConnectionState.waitingForNetwork => ConnectionStatus.connecting,
         null ||
         SignalingConnectionState.ended ||
         SignalingConnectionState.disconnected => ConnectionStatus.disconnected,
