@@ -68,7 +68,12 @@ class RecoveryFakePeerConnection implements RtcPeerConnection {
       _onConnectionState = callback;
 
   @override
-  Future<RtcConnectionStats?> getStats() async => null;
+  Future<RtcConnectionStats?> getStats() async => nextStats;
+
+  /// Inbound counters the receiver polls. A viewer only reaches
+  /// `connected` once these show RTP actually advancing, so a test that wants a
+  /// live viewer has to supply them rather than just firing an ICE state.
+  RtcConnectionStats? nextStats;
 
   @override
   Future<void> setRemoteDescription(RtcSessionDescription description) async {}
@@ -528,15 +533,20 @@ void main() {
         ),
       );
       await Future<void>.delayed(Duration.zero);
-      peerFactory.created.single.fireConnectionState(
-        RtcConnectionState.connected,
-      );
+      final peer = peerFactory.created.single;
+      peer.fireConnectionState(RtcConnectionState.connected);
       await Future<void>.delayed(Duration.zero);
+      // ICE alone is not a live stream: the viewer stays at waitingForMedia
+      // until inbound RTP advances, so this drives a real poll to get there.
+      peer.nextStats = const RtcConnectionStats(
+        inboundAudio: RtcInboundAudioStats(packetsReceived: 240, packetsLost: 0),
+      );
+      await receiver.refreshStats();
       expect(receiver.connectionStateValue, ListenerConnectionState.connected);
 
       return (
         outbound: outbound,
-        peer: peerFactory.created.single,
+        peer: peer,
         dropSocket: () async {
           await sockets.first.close();
           await Future<void>.delayed(Duration.zero);

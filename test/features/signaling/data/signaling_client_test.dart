@@ -104,11 +104,18 @@ class ManualTimer implements Timer {
 /// A [NetworkMonitor] whose transport changes are pushed by the test.
 class ControllableNetworkMonitor implements NetworkMonitor {
   final _controller = StreamController<bool>.broadcast();
+  bool _isOnline = true;
 
   @override
   Stream<bool> get onChanged => _controller.stream;
 
-  void emit(bool online) => _controller.add(online);
+  @override
+  bool get isOnline => _isOnline;
+
+  void emit(bool online) {
+    _isOnline = online;
+    _controller.add(online);
+  }
 
   Future<void> close() => _controller.close();
 }
@@ -125,6 +132,7 @@ void main() {
     late ControllableNetworkMonitor network;
     late List<Uri> uris;
     late List<ManualTimer> timers;
+    late List<ManualTimer> stabilizationTimers;
     late SignalingClient client;
     late StreamSession recoverySession;
     late bool failNextConnect;
@@ -133,6 +141,7 @@ void main() {
       network = ControllableNetworkMonitor();
       uris = [];
       timers = [];
+      stabilizationTimers = [];
       failNextConnect = false;
       final webSocketClient = WebSocketClient(
         diagnosticLog: _testLog(),
@@ -152,6 +161,11 @@ void main() {
         deviceIdentitySession: MutableDeviceIdentitySession(),
         diagnosticLog: _testLog(),
         networkMonitor: network,
+        scheduleTimer: (delay, callback) {
+          final timer = ManualTimer(delay, callback);
+          stabilizationTimers.add(timer);
+          return timer;
+        },
       );
       recoverySession = StreamSession(
         sessionId: 'session-9',
@@ -175,10 +189,35 @@ void main() {
       failNextConnect = false;
       network.emit(true);
       await Future<void>.delayed(Duration.zero);
+      expect(uris, hasLength(1),
+          reason: 'the interface is up but may not carry a handshake yet');
+      stabilizationTimers.single.fire();
+      await Future<void>.delayed(Duration.zero);
 
       expect(uris, hasLength(2),
           reason: 'the handover must not wait out the backoff');
       expect(timers.single.isActive, isFalse);
+    });
+
+    test('a flapping handover retries once, after it settles', () async {
+      failNextConnect = true;
+      await client.connect(session: recoverySession);
+      await Future<void>.delayed(Duration.zero);
+
+      failNextConnect = false;
+      // Leaving Wi-Fi for cellular reports several transitions in a row, and the
+      // early ones name a route that is already gone. Retrying on each of them
+      // spends attempts on interfaces that never had a chance.
+      network.emit(true);
+      network.emit(false);
+      network.emit(true);
+      await Future<void>.delayed(Duration.zero);
+      for (final timer in stabilizationTimers) {
+        timer.fire();
+      }
+      await Future<void>.delayed(Duration.zero);
+
+      expect(uris, hasLength(2), reason: 'one retry, once the transports settle');
     });
 
     test('losing the network does not itself trigger a retry', () async {
@@ -200,6 +239,10 @@ void main() {
 
       failNextConnect = false;
       network.emit(true);
+      await Future<void>.delayed(Duration.zero);
+      for (final timer in stabilizationTimers) {
+        timer.fire();
+      }
       await Future<void>.delayed(Duration.zero);
 
       expect(uris, hasLength(1), reason: 'a deliberate leave stays left');

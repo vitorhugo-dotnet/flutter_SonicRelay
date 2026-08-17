@@ -9,6 +9,11 @@ enum WebSocketConnectionState {
   connecting,
   connected,
   reconnecting,
+
+  /// The device has no usable transport, so reconnects are parked rather than
+  /// retried. Deliberately distinct from [reconnecting]: no attempt budget is
+  /// being spent here, and the cause is the device rather than the backend.
+  waitingForNetwork,
   disconnected,
 }
 
@@ -39,6 +44,14 @@ typedef WebSocketHeadersProvider =
 /// stops all further reconnect attempts (e.g. when the device identity has
 /// been revoked and retrying would never succeed).
 typedef WebSocketReconnectPredicate = bool Function(Object error);
+
+/// Reports whether the device currently has a usable transport.
+///
+/// This is transport availability, not backend reachability — a captive portal
+/// still reads as available. That is the right granularity here: the answer is
+/// only ever used to decide whether an attempt is worth spending budget on, and
+/// an attempt that fails anyway falls back to the normal backoff.
+typedef NetworkAvailabilityProbe = bool Function();
 
 /// Default [WebSocketConnector] backed by `dart:io`'s [WebSocket].
 /// How often an open signaling socket sends a keepalive ping.
@@ -146,17 +159,22 @@ class WebSocketClient {
     required WebSocketConnector connector,
     required DiagnosticLog diagnosticLog,
     ReconnectPolicy reconnectPolicy = const ReconnectPolicy(),
+    NetworkAvailabilityProbe? isNetworkAvailable,
     Timer Function(Duration delay, void Function() callback)? scheduleTimer,
     math.Random? random,
   }) : _connector = connector,
        _diagnosticLog = diagnosticLog,
        _reconnectPolicy = reconnectPolicy,
+       _isNetworkAvailable = isNetworkAvailable ?? _alwaysAvailable,
        _scheduleTimer = scheduleTimer ?? Timer.new,
        _random = random ?? math.Random();
+
+  static bool _alwaysAvailable() => true;
 
   final WebSocketConnector _connector;
   final DiagnosticLog _diagnosticLog;
   final ReconnectPolicy _reconnectPolicy;
+  final NetworkAvailabilityProbe _isNetworkAvailable;
   final Timer Function(Duration delay, void Function() callback)
   _scheduleTimer;
   final math.Random _random;
@@ -331,6 +349,10 @@ class WebSocketClient {
 
   void _scheduleReconnect(int generation) {
     if (!_isCurrent(generation)) return;
+    if (!_isNetworkAvailable()) {
+      _parkUntilNetworkReturns(generation);
+      return;
+    }
     final jitterSample = _random.nextDouble() * 2 - 1;
     final delay = _reconnectPolicy.jitteredDelayForAttempt(
       _attempt,
@@ -342,6 +364,31 @@ class WebSocketClient {
       if (_isCurrent(generation)) {
         unawaited(_attemptConnect(generation));
       }
+    });
+  }
+
+  /// Suspends reconnects while the device has no usable transport.
+  ///
+  /// The attempt counter deliberately does not advance: an attempt made with no
+  /// route fails for a reason that says nothing about the backend, and spending
+  /// the budget on those is what left a viewer sitting at the capped 30-second
+  /// delay — or out of retries entirely — with the network already back.
+  ///
+  /// [retryNow] is the normal way out, driven by the network monitor or a
+  /// foreground resume. The timer scheduled here is only a safety net: the
+  /// connectivity probe can miss a transition, and Android freezes a process
+  /// without a foreground service, taking its pending timers with it. Parking
+  /// forever on a probe that is merely wrong would be a worse failure than the
+  /// burned budget this exists to prevent, so the re-check runs at the policy's
+  /// cap — rare enough to cost nothing, frequent enough to recover.
+  void _parkUntilNetworkReturns(int generation) {
+    _reconnectTimer?.cancel();
+    _stateController.add(WebSocketConnectionState.waitingForNetwork);
+    unawaited(
+      _diagnosticLog.write('WebSocket', 'no usable network; reconnect parked'),
+    );
+    _reconnectTimer = _scheduleTimer(_reconnectPolicy.maxDelay, () {
+      if (_isCurrent(generation)) unawaited(_attemptConnect(generation));
     });
   }
 

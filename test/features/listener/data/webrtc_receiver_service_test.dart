@@ -595,7 +595,7 @@ void main() {
     expect(audio.played.single.id, 'remote-1');
   });
 
-  test('connection state transitions map to listener state and stats', () async {
+  test('ICE connecting without media stops short of connected', () async {
     final states = <ListenerConnectionState>[];
     service.connectionState.listen(states.add);
 
@@ -608,9 +608,73 @@ void main() {
     factory.created.single.fireConnectionState(RtcConnectionState.connected);
     await Future<void>.delayed(Duration.zero);
 
-    expect(states, contains(ListenerConnectionState.connected));
+    // A negotiated ICE path proves the peers can reach each other, not that
+    // audio is arriving. Reporting Live here is what produced the worst symptom
+    // of a half-recovered session: a viewer showing a healthy connection and a
+    // running timer with silence coming out of the speaker.
+    expect(service.connectionStateValue, ListenerConnectionState.waitingForMedia);
+    expect(states, isNot(contains(ListenerConnectionState.connected)));
     expect(service.statsValue.iceState, 'Connected');
+    expect(service.statsValue.connectedAt, isNull);
+  });
+
+  test('inbound audio actually arriving is what promotes the state to connected',
+      () async {
+    final states = <ListenerConnectionState>[];
+    service.connectionState.listen(states.add);
+
+    await service.handleSignal(
+      _message(
+        SignalingMessageType.webrtcOffer,
+        payload: {'sdp': 'offer-sdp', 'type': 'offer'},
+      ),
+    );
+    final connection = factory.created.single;
+    connection.fireConnectionState(RtcConnectionState.connected);
+    await Future<void>.delayed(Duration.zero);
+
+    connection.nextStats = const RtcConnectionStats(
+      inboundAudio: RtcInboundAudioStats(packetsReceived: 0, packetsLost: 0),
+    );
+    await service.refreshStats();
+    expect(service.connectionStateValue, ListenerConnectionState.waitingForMedia,
+        reason: 'a poll with no packets is not media flowing');
+
+    connection.nextStats = const RtcConnectionStats(
+      inboundAudio: RtcInboundAudioStats(packetsReceived: 240, packetsLost: 0),
+    );
+    await service.refreshStats();
+    await Future<void>.delayed(Duration.zero);
+
+    expect(service.connectionStateValue, ListenerConnectionState.connected);
+    expect(states, contains(ListenerConnectionState.connected));
     expect(service.statsValue.connectedAt, isNotNull);
+  });
+
+  test('a media path that drops clears the metrics it left behind', () async {
+    await service.handleSignal(
+      _message(
+        SignalingMessageType.webrtcOffer,
+        payload: {'sdp': 'offer-sdp', 'type': 'offer'},
+      ),
+    );
+    final connection = factory.created.single;
+    connection.fireConnectionState(RtcConnectionState.connected);
+    connection.nextStats = const RtcConnectionStats(
+      rttMs: 42,
+      inboundAudio: RtcInboundAudioStats(packetsReceived: 240, packetsLost: 0),
+    );
+    await service.refreshStats();
+    expect(service.statsValue.rttMs, 42);
+
+    connection.fireConnectionState(RtcConnectionState.disconnected);
+    await Future<void>.delayed(Duration.zero);
+
+    // Those readings describe a path that no longer carries anything. Leaving
+    // them on screen during a reconnect reads as a healthy connection.
+    expect(service.statsValue.rttMs, isNull);
+    expect(service.statsValue.packetsReceived, isNull);
+    expect(service.statsValue.connectedAt, isNull);
   });
 
   test('session.ended tears down the peer connection and stops audio', () async {

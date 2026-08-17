@@ -65,6 +65,9 @@ class StreamLifecycleController {
     ListenerConnectionState.waitingForOffer ||
     ListenerConnectionState.negotiating ||
     ListenerConnectionState.connecting ||
+    // Waiting for the first audio packets is exactly when the process must not
+    // be frozen: killing it here strands a recovery one step from finishing.
+    ListenerConnectionState.waitingForMedia ||
     ListenerConnectionState.connected ||
     ListenerConnectionState.reconnecting => true,
     ListenerConnectionState.idle ||

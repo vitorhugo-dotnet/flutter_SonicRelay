@@ -90,7 +90,9 @@ class ListenerViewModel extends Notifier<ListenerState> {
       if (signaling == SignalingConnectionState.connected &&
           (previous == SignalingConnectionState.reconnecting ||
               previous == SignalingConnectionState.disconnected) &&
-          _receiver.connectionStateValue != ListenerConnectionState.connected) {
+          _receiver.connectionStateValue != ListenerConnectionState.connected &&
+          _receiver.connectionStateValue !=
+              ListenerConnectionState.waitingForMedia) {
         unawaited(_receiver.reconnect());
       }
     });

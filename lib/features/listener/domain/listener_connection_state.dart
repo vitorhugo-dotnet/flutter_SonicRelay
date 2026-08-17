@@ -12,7 +12,15 @@ enum ListenerConnectionState {
   /// ICE is establishing the media path.
   connecting,
 
-  /// Media path established; remote audio is playing.
+  /// ICE reached `connected`, but no inbound audio has been observed yet.
+  ///
+  /// A negotiated ICE path proves the peers can reach each other, not that audio
+  /// is arriving. Treating the two as the same thing is what produced the worst
+  /// symptom of a half-recovered session: a viewer showing a healthy connection
+  /// and a running timer with silence coming out of the speaker.
+  waitingForMedia,
+
+  /// Media path established and remote audio is actually arriving.
   connected,
 
   /// The media path dropped but may still recover (transient ICE loss).

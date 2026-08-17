@@ -327,18 +327,36 @@ class WebRtcReceiverService {
         _setStats(_stats.copyWith(iceState: 'Connecting'));
         _setState(ListenerConnectionState.connecting);
       case RtcConnectionState.connected:
-        _setStats(
-          _stats.copyWith(iceState: 'Connected', connectedAt: DateTime.now()),
-        );
-        _setState(ListenerConnectionState.connected);
+        // Deliberately not `connected` yet: ICE only proves the peers can reach
+        // each other. `refreshStats` promotes this once inbound RTP actually
+        // advances — see [_promoteOnMediaFlow].
+        _setStats(_stats.copyWith(iceState: 'Connected'));
+        _setState(ListenerConnectionState.waitingForMedia);
         _startStatsPolling();
       case RtcConnectionState.disconnected:
         // Transient ICE loss: keep the peer connection alive, it may recover.
+        // The metrics go with it — they describe a path that is no longer
+        // carrying anything, and leaving them on screen during a reconnect
+        // reads as a healthy connection.
         _stopStatsPolling();
-        _setStats(_stats.copyWith(iceState: 'Reconnecting'));
+        _setStats(
+          _stats.copyWith(
+            iceState: 'Reconnecting',
+            hasRemoteAudio: false,
+            clearConnectedAt: true,
+            clearMetrics: true,
+          ),
+        );
         _setState(ListenerConnectionState.reconnecting);
       case RtcConnectionState.failed:
         _stopStatsPolling();
+        _setStats(
+          _stats.copyWith(
+            hasRemoteAudio: false,
+            clearConnectedAt: true,
+            clearMetrics: true,
+          ),
+        );
         final publisher = _publisherId;
         if (publisher != null) {
           // A failed ICE connection is recoverable while signaling is up (and
@@ -415,6 +433,7 @@ class WebRtcReceiverService {
         ),
         scale: 1000,
       );
+      _promoteOnMediaFlow(_delta(previous?.packetsReceived, inbound.packetsReceived));
       _previousInboundAudio = inbound;
     }
 
@@ -450,6 +469,24 @@ class WebRtcReceiverService {
         concealmentEvents: inbound?.concealmentEvents,
       ),
     );
+  }
+
+  /// Promotes [ListenerConnectionState.waitingForMedia] to
+  /// [ListenerConnectionState.connected] once inbound RTP has actually advanced
+  /// over a stats interval.
+  ///
+  /// This is the only path to `connected`, and it is what makes the UI's `Live`
+  /// mean what it says. An ICE connection recovers well before — sometimes long
+  /// before — the publisher resumes sending, and a recovery that stalls in
+  /// between used to be indistinguishable from a healthy one: connected badge,
+  /// running timer, silence. `connectedAt` is stamped here too, so the session
+  /// timer counts audio rather than negotiation.
+  void _promoteOnMediaFlow(double? packetsReceivedDelta) {
+    if (_state != ListenerConnectionState.waitingForMedia) return;
+    if (packetsReceivedDelta == null || packetsReceivedDelta <= 0) return;
+    sonicLog('WebRTC', 'inbound audio flowing -> connected');
+    _setStats(_stats.copyWith(connectedAt: DateTime.now()));
+    _setState(ListenerConnectionState.connected);
   }
 
   /// Delta between successive cumulative counters, clamped at zero so a stats

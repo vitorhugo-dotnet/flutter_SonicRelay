@@ -472,22 +472,24 @@ final discoverableSessionsProvider =
   }
 });
 
-final webSocketClientProvider = Provider<WebSocketClient>(
-  (ref) => WebSocketClient(
-    connector: ioWebSocketConnector,
-    diagnosticLog: ref.watch(diagnosticLogProvider),
-  ),
-);
-
 /// Watches the device's network transports so a Wi-Fi/cellular handover can
 /// retry signaling immediately instead of waiting out a backoff scheduled while
-/// there was no route at all. Only Android and iOS have a plugin behind
+/// there was no route at all, and so a device with no route at all parks instead
+/// of spending its reconnect budget. Only Android and iOS have a plugin behind
 /// `connectivity_plus` here; everything else (including tests) keeps the plain
-/// backoff.
+/// backoff by always reporting itself online.
 final networkMonitorProvider = Provider<NetworkMonitor>(
   (ref) => Platform.isAndroid || Platform.isIOS
       ? ConnectivityNetworkMonitor()
       : const NoopNetworkMonitor(),
+);
+
+final webSocketClientProvider = Provider<WebSocketClient>(
+  (ref) => WebSocketClient(
+    connector: ioWebSocketConnector,
+    diagnosticLog: ref.watch(diagnosticLogProvider),
+    isNetworkAvailable: () => ref.read(networkMonitorProvider).isOnline,
+  ),
 );
 
 final signalingClientProvider = Provider<SignalingClient>(
