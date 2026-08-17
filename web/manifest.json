@@ -1,11 +1,11 @@
 {
-    "name": "sonic_relay",
-    "short_name": "sonic_relay",
+    "name": "SonicRelay",
+    "short_name": "SonicRelay",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",
     "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "description": "SonicRelay viewer: join a session and listen to low-latency audio streamed from a SonicRelay publisher.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [
