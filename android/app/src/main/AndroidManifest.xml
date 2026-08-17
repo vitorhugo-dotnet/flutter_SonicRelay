@@ -22,7 +22,7 @@
          throttle the CPU of a mediaPlayback service without one). -->
     <uses-permission android:name="android.permission.WAKE_LOCK"/>
     <application
-        android:label="sonic_relay"
+        android:label="SonicRelay"
         android:name=".SonicRelayApplication"
         android:icon="@mipmap/ic_launcher">
         <activity
