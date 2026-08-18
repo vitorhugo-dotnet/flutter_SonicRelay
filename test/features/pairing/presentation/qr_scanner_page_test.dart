@@ -1,3 +1,4 @@
+import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sonic_relay/features/pairing/presentation/qr_scanner_page.dart';
@@ -6,6 +7,32 @@ const validPayload =
     '{"challengeId":"00000000-0000-0000-0000-000000000001","code":"ABC12345"}';
 
 void main() {
+  group('scannerErrorMessage', () {
+    test('names permission denial so the user knows what to fix', () {
+      for (final code in [
+        'CameraAccessDenied',
+        'CameraAccessDeniedWithoutPrompt',
+        'CameraAccessRestricted',
+      ]) {
+        expect(
+          scannerErrorMessage(CameraException(code, 'denied')),
+          'Camera permission denied.',
+        );
+      }
+    });
+
+    test('falls back to a generic message for any other failure', () {
+      expect(
+        scannerErrorMessage(CameraException('cameraNotFound', 'no camera')),
+        'Unable to start the camera.',
+      );
+      expect(
+        scannerErrorMessage(Exception('boom')),
+        'Unable to start the camera.',
+      );
+    });
+  });
+
   testWidgets('starts on open and submits only the first accepted QR frame', (
     tester,
   ) async {

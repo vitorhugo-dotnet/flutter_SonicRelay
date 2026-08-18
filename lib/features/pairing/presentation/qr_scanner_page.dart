@@ -1,7 +1,8 @@
 import 'dart:async';
 
+import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
-import 'package:mobile_scanner/mobile_scanner.dart';
+import 'package:flutter_zxing/flutter_zxing.dart';
 
 import '../domain/pairing_challenge_payload.dart';
 
@@ -17,44 +18,101 @@ abstract interface class PairingScannerController {
   Widget buildScanner({required ValueChanged<String?> onDetected});
 }
 
-class MobilePairingScannerController implements PairingScannerController {
-  MobilePairingScannerController()
-    : _controller = MobileScannerController(
-        autoStart: false,
-        formats: const [BarcodeFormat.qrCode],
-      );
+/// Maps a camera start failure onto the message the scanner surface shows.
+///
+/// Permission denial is called out separately because it is the one failure the
+/// user can act on, and `QrScannerPage` keeps the manual-entry fallback visible
+/// underneath either way.
+@visibleForTesting
+String scannerErrorMessage(Object error) {
+  const deniedCodes = {
+    'CameraAccessDenied',
+    'CameraAccessDeniedWithoutPrompt',
+    'CameraAccessRestricted',
+  };
 
-  final MobileScannerController _controller;
+  if (error is CameraException && deniedCodes.contains(error.code)) {
+    return 'Camera permission denied.';
+  }
+  return 'Unable to start the camera.';
+}
+
+/// Scans pairing QR codes with ZXing.
+///
+/// ZXing is compiled from source by `flutter_zxing`, which keeps every
+/// distribution channel - F-Droid included - free of the proprietary MLKit
+/// binaries the previous scanner pulled in (SonicRelay#37).
+///
+/// `ReaderWidget` owns its camera and exposes no start/stop handle, so this
+/// controller maps the interface onto mounting and unmounting it: stopping
+/// disposes the camera outright rather than leaving it open behind a paused
+/// preview.
+class ZxingPairingScannerController implements PairingScannerController {
+  final ValueNotifier<_ScannerState> _state = ValueNotifier(
+    const _ScannerState.stopped(),
+  );
+  bool _disposed = false;
 
   @override
-  Widget buildScanner({required ValueChanged<String?> onDetected}) {
-    return MobileScanner(
-      controller: _controller,
-      onDetect: (capture) {
-        for (final barcode in capture.barcodes) {
-          if (barcode.rawValue case final raw?) {
-            onDetected(raw);
-            return;
-          }
-        }
-      },
-      errorBuilder: (context, error) {
-        if (error.errorCode == MobileScannerErrorCode.permissionDenied) {
-          return const Center(child: Text('Camera permission denied.'));
-        }
-        return const Center(child: Text('Unable to start the camera.'));
-      },
-    );
+  Future<void> start() async => _moveTo(const _ScannerState.running());
+
+  @override
+  Future<void> stop() async => _moveTo(const _ScannerState.stopped());
+
+  @override
+  Future<void> dispose() async {
+    _disposed = true;
+    _state.dispose();
+  }
+
+  /// Camera setup is asynchronous, so its result can land after the page is
+  /// gone. Dropping it then keeps a late callback from writing to a disposed
+  /// notifier.
+  void _moveTo(_ScannerState next) {
+    if (_disposed) return;
+    _state.value = next;
   }
 
   @override
-  Future<void> dispose() => _controller.dispose();
+  Widget buildScanner({required ValueChanged<String?> onDetected}) {
+    return ValueListenableBuilder<_ScannerState>(
+      valueListenable: _state,
+      builder: (context, state, _) {
+        if (state.error case final message?) {
+          return Center(child: Text(message));
+        }
+        if (!state.isRunning) {
+          return const ColoredBox(
+            color: Colors.black,
+            child: SizedBox.expand(),
+          );
+        }
 
-  @override
-  Future<void> start() => _controller.start();
+        return ReaderWidget(
+          codeFormat: Format.qrCode,
+          showGallery: false,
+          showToggleCamera: false,
+          onScan: (code) {
+            if (code.text case final raw?) onDetected(raw);
+          },
+          onControllerCreated: (_, error) {
+            if (error != null) {
+              _moveTo(_ScannerState.failed(scannerErrorMessage(error)));
+            }
+          },
+        );
+      },
+    );
+  }
+}
 
-  @override
-  Future<void> stop() => _controller.stop();
+class _ScannerState {
+  const _ScannerState.running() : isRunning = true, error = null;
+  const _ScannerState.stopped() : isRunning = false, error = null;
+  const _ScannerState.failed(this.error) : isRunning = false;
+
+  final bool isRunning;
+  final String? error;
 }
 
 class QrScannerPage extends StatefulWidget {
@@ -81,7 +139,7 @@ class _QrScannerPageState extends State<QrScannerPage>
   @override
   void initState() {
     super.initState();
-    _controller = widget.scannerController ?? MobilePairingScannerController();
+    _controller = widget.scannerController ?? ZxingPairingScannerController();
     WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) unawaited(_startScanner());

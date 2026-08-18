@@ -1,6 +1,8 @@
 # SonicRelay Flutter Viewer
 
-Mobile viewer for the low-latency SonicRelay audio streaming suite.
+Mobile viewer for the low-latency SonicRelay audio streaming suite. It targets
+Android and iOS only; the web and desktop runners were removed rather than left
+unmaintained.
 
 - [Backend](https://github.com/vitorhugo-java/dotnet_SonicRelay)
 - [Windows publisher](https://github.com/vitorhugo-java/windows_SonicRelay)
@@ -80,7 +82,28 @@ On `/pair`, the viewer can scan the QR code displayed by SonicRelay Windows or e
 }
 ```
 
-The camera permission is requested only when the dedicated QR scanner screen is opened. Denying it leaves the manual pairing path available. Pairing uses `POST /api/pairings/complete`, listing uses `GET /api/devices/{deviceId}/pairings`, and revocation uses `DELETE /api/pairings/{pairingId}`. Revocation blocks future joins but does not terminate a session that is already active.
+The camera permission is requested only when the dedicated QR scanner screen is opened. Denying it leaves the manual pairing path available.
+
+Scanning runs on `flutter_zxing`, which compiles ZXing from bundled C++ source.
+That choice is deliberate and load-bearing: the previous scanner pulled
+`com.google.android.gms:play-services-mlkit-barcode-scanning` and
+`com.google.mlkit:barcode-scanning` into the APK, and F-Droid builds every app
+from source and rejects closed-source dependencies. A Gradle product flavor
+cannot exclude such a plugin, because Flutter compiles and registers every
+plugin regardless of the flavor being built, so the scanner itself had to be
+free software for the `fdroid` flavor to be publishable. Replacing it in every
+flavor rather than only in `fdroid` keeps one scanner to test and keeps QR
+pairing - a headline feature on both store listings - working everywhere.
+`test/architecture/foss_dependencies_test.dart` fails the build if any resolved
+package reintroduces a proprietary Google Android artifact.
+
+`flutter_zxing` drives the camera through `camera_android_camerax`, whose
+manifest declares `RECORD_AUDIO`, `WRITE_EXTERNAL_STORAGE`, and (by merger
+implication) `READ_EXTERNAL_STORAGE`. The viewer needs none of them, so
+`android/app/src/main/AndroidManifest.xml` drops all three at merge time and
+the shipped permission set is unchanged from before the swap.
+
+Pairing uses `POST /api/pairings/complete`, listing uses `GET /api/devices/{deviceId}/pairings`, and revocation uses `DELETE /api/pairings/{pairingId}`. Revocation blocks future joins but does not terminate a session that is already active.
 
 ## Session join flow
 

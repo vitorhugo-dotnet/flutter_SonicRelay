@@ -1,4 +1,5 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
     <!-- Required for the app to reach the SonicRelay API/WebSocket in release
          builds. Debug/profile manifests declare this separately for tooling. -->
     <uses-permission android:name="android.permission.INTERNET"/>
@@ -10,6 +11,16 @@
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE"/>
     <!-- Requested only when the user opens the device-pairing QR scanner. -->
     <uses-permission android:name="android.permission.CAMERA"/>
+    <!-- The QR scanner drives the camera through camera_android_camerax, whose
+         own manifest declares RECORD_AUDIO and WRITE_EXTERNAL_STORAGE. The
+         viewer never records audio and never touches shared storage, so they
+         are dropped at merge time rather than shipped and left unused on the
+         store listing. READ_EXTERNAL_STORAGE goes with them: the manifest
+         merger implies it from camerax's WRITE request, so removing only the
+         write permission still leaves a read permission in the APK. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" tools:node="remove"/>
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" tools:node="remove"/>
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" tools:node="remove"/>
     <!-- Keep the viewer alive while backgrounded during an active stream via a
          mediaPlayback foreground service (issue #13). Android 14+ requires both
          the base and the type-specific permission. POST_NOTIFICATIONS (13+) is
