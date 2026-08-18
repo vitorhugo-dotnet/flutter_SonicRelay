@@ -9,6 +9,14 @@ class AppConfig {
     defaultValue: 'https://sonicrelay-api.hugodotnet.dev',
   );
 
+  /// The published SonicRelay privacy policy. Google Play requires the policy to
+  /// be reachable from inside the app, not only from the store listing, so the
+  /// settings screen links here. Overridable at build time for a staging site.
+  static const privacyPolicyUrl = String.fromEnvironment(
+    'SONIC_RELAY_PRIVACY_POLICY_URL',
+    defaultValue: 'https://hugodotnet.dev/sonicrelay/privacy-policy',
+  );
+
   factory AppConfig.fromEnvironment() =>
       AppConfig.fromServerUrl(defaultServerUrl);
 

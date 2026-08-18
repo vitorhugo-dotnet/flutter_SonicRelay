@@ -62,4 +62,13 @@ void main() {
 
     expect(find.text('Coturn'), findsNothing);
   });
+
+  testWidgets('the privacy policy link is reachable before pairing', (tester) async {
+    // Play requires the policy to be reachable from inside the app, and a user
+    // who has not paired yet is exactly the one most likely to go looking for
+    // it, so this link must not sit behind the paired-only sections.
+    await _pumpSettings(tester, _PairingRequiredReadinessNotifier.new);
+
+    expect(find.text('Privacy policy'), findsOneWidget);
+  });
 }
