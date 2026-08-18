@@ -9,6 +9,7 @@ import 'package:sonic_relay/features/sessions/domain/stream_session.dart';
 import 'package:sonic_relay/features/sessions/presentation/join_session_page.dart';
 import 'package:sonic_relay/features/sessions/presentation/join_session_view_model.dart';
 import 'package:sonic_relay/features/sessions/presentation/widgets/discovered_sessions_list.dart';
+import 'package:sonic_relay/features/support/presentation/widgets/support_project_card.dart';
 
 const _discoveredSession = DiscoverableSession(
   sessionId: '11111111-1111-1111-1111-111111111111',
@@ -121,4 +122,20 @@ void main() {
       expect(find.text('Waiting'), findsOneWidget);
     },
   );
+
+  testWidgets('the donation card sits below the join controls', (tester) async {
+    // The relay is funded out of pocket, so the ask lives on the screen every
+    // launch lands on — but under the join card, never competing with it.
+    await tester.pumpWidget(_wrap());
+    await tester.pumpAndSettle();
+
+    final card = tester.widget<SupportProjectCard>(
+      find.byType(SupportProjectCard),
+    );
+    expect(card.compact, isFalse);
+    expect(
+      tester.getTopLeft(find.byType(SupportProjectCard)).dy,
+      greaterThan(tester.getTopLeft(find.text('Join stream')).dy),
+    );
+  });
 }

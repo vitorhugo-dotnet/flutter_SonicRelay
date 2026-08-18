@@ -10,6 +10,7 @@ import '../../../app/theme/app_colors.dart';
 import '../../../app/theme/app_spacing.dart';
 import '../../../core/widgets/sonic_button.dart';
 import '../../../core/widgets/sonic_card.dart';
+import '../../support/presentation/widgets/support_project_card.dart';
 import 'widgets/coturn_url_field.dart';
 import 'widgets/keep_playing_toggle.dart';
 import 'widgets/privacy_policy_link.dart';
@@ -144,6 +145,8 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                     textAlign: TextAlign.center,
                     style: Theme.of(context).textTheme.bodySmall,
                   ),
+                  const SizedBox(height: AppSpacing.lg),
+                  const SupportProjectCard(compact: true),
                   const SizedBox(height: AppSpacing.md),
                   const PrivacyPolicyLink(),
                   const SizedBox(height: AppSpacing.sm),

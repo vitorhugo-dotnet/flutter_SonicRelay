@@ -8,6 +8,7 @@ import 'package:sonic_relay/app/di/app_providers.dart';
 import 'package:sonic_relay/core/storage/relay_mode_storage.dart';
 import 'package:sonic_relay/core/webrtc/relay_modes.dart';
 import 'package:sonic_relay/features/settings/presentation/settings_page.dart';
+import 'package:sonic_relay/features/support/presentation/widgets/support_project_card.dart';
 
 class _FakeRelayModeStorage extends RelayModeStorage {
   _FakeRelayModeStorage() : super(const FlutterSecureStorage());
@@ -70,5 +71,16 @@ void main() {
     await _pumpSettings(tester, _PairingRequiredReadinessNotifier.new);
 
     expect(find.text('Privacy policy'), findsOneWidget);
+  });
+
+  testWidgets('the donation card is reachable from settings', (tester) async {
+    // Settings is where a user who already decided to support the project goes
+    // looking, so the ask must not sit behind the paired-only sections.
+    await _pumpSettings(tester, _PairingRequiredReadinessNotifier.new);
+
+    final card = tester.widget<SupportProjectCard>(
+      find.byType(SupportProjectCard),
+    );
+    expect(card.compact, isTrue);
   });
 }

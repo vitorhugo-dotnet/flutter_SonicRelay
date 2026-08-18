@@ -17,6 +17,15 @@ class AppConfig {
     defaultValue: 'https://hugodotnet.dev/sonicrelay/privacy-policy',
   );
 
+  /// The Buy Me a Coffee page that funds this project. SonicRelay runs on
+  /// signaling and TURN servers paid for out of pocket, so the app asks for
+  /// support instead of charging or shipping ads. Overridable at build time so
+  /// a fork can point at its own maintainer.
+  static const donationUrl = String.fromEnvironment(
+    'SONIC_RELAY_DONATION_URL',
+    defaultValue: 'https://www.buymeacoffee.com/vitorhugo1207',
+  );
+
   factory AppConfig.fromEnvironment() =>
       AppConfig.fromServerUrl(defaultServerUrl);
 
