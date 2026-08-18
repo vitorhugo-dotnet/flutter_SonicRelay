@@ -8,6 +8,7 @@ import '../../../app/theme/app_spacing.dart';
 import '../../../core/widgets/connection_badge.dart';
 import '../../../core/widgets/sonic_button.dart';
 import '../../../core/widgets/sonic_card.dart';
+import '../../support/presentation/widgets/support_project_card.dart';
 import 'join_session_view_model.dart';
 import 'widgets/discovered_sessions_list.dart';
 import 'widgets/session_code_input.dart';
@@ -126,6 +127,8 @@ class JoinSessionPage extends ConsumerWidget {
                           : null,
                     ),
                   ],
+                  const SizedBox(height: AppSpacing.xl),
+                  const SupportProjectCard(),
                 ],
               ),
             ),
