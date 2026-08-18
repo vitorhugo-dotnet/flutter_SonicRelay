@@ -1,25 +1,48 @@
-SonicRelay streams the audio playing on your computer straight to your phone, with the low latency of a direct peer-to-peer connection.
+Bring your PC audio to your phone.
 
-Start a session on the SonicRelay publisher running on your PC, scan or type the temporary session code on your phone, and listen. Audio travels directly between the two devices over WebRTC — the server only handles sign-in, sessions and signalling, and never relays your audio.
+SonicRelay lets you listen on your Android device to the audio playing on your Windows PC, with low latency and without complicated setup.
 
-Features
+Want to follow a video away from your computer, listen to music, games, calls, or simply use your phone as a convenient way to receive your PC audio? SonicRelay connects your devices and streams audio in real time.
 
-* Low-latency audio over WebRTC, peer-to-peer whenever the network allows.
-* Join a session with a short temporary code.
-* Live connection monitor: signalling state, ICE state, estimated latency, jitter, and whether the stream is direct or relayed.
-* Background playback: keep listening with the screen off or another app in front, with a persistent notification offering Open, Stop and Reconnect.
-* Device management: see and revoke the devices registered to your account.
-* Dark Material 3 interface.
+🎧 PC audio directly on your phone
 
-Bring your own server
+SonicRelay captures the audio playing on Windows and sends it to your Android device using technologies designed for real-time communication.
 
-SonicRelay is not tied to a single provider. The server address is configurable inside the app, and the backend is free software you can host yourself:
+⚡ Low-latency audio streaming
 
-* Backend: https://github.com/vitorhugo-java/dotnet_SonicRelay
-* Windows publisher: https://github.com/vitorhugo-java/windows_SonicRelay
+SonicRelay uses WebRTC and the Opus audio codec, establishing a direct connection between devices whenever possible to reduce delay during playback.
 
-You will need a SonicRelay account on whichever server you point the app at, plus the publisher running on the machine whose audio you want to hear.
+🔗 Simple connection
 
-Privacy
+Create a session on your computer, connect your phone, and start listening. SonicRelay handles communication between your devices without requiring complicated network configuration.
 
-Access tokens and the device identifier are kept in Android's encrypted storage and are never written to logs or plain preferences. The app only receives audio: it never opens your microphone and never sends media of its own.
+📱 Main features
+
+• Stream audio from Windows to Android
+• Real-time, low-latency audio
+• WebRTC with Opus audio codec
+• Direct device-to-device connection when available
+• Automatic relay when required by the network
+• Secure sessions between devices
+• Temporary connection codes
+• Support for multiple devices
+• Connection and session status
+• Automatic reconnection after network interruptions
+
+🖥️ Windows app required
+
+To stream audio, you also need to install SonicRelay for Windows on the computer that will transmit the sound.
+
+The Windows application works as the audio sender, while SonicRelay on Android receives and plays the stream.
+
+Who is SonicRelay for?
+
+SonicRelay is a simple solution for anyone looking to:
+
+• listen to PC audio on a phone
+• stream Windows audio to Android
+• listen to music, videos, games, or calls away from the computer
+• stream audio between devices with low latency
+• avoid heavy streaming solutions for a simple task
+
+Your PC plays it. Your phone hears it. SonicRelay connects them.

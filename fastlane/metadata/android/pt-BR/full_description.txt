@@ -1,0 +1,48 @@
+Leve o áudio do seu PC para o celular.
+
+Com o SonicRelay, você pode ouvir no Android o áudio reproduzido no seu computador Windows com baixa latência e sem configurações complicadas.
+
+Quer acompanhar um vídeo longe do PC, ouvir músicas, jogos, chamadas ou simplesmente usar o celular como uma forma prática de receber o som do computador? O SonicRelay conecta seus dispositivos e transmite o áudio em tempo real.
+
+🎧 Áudio do PC direto no celular
+
+O SonicRelay captura o áudio reproduzido no Windows e envia para seu dispositivo Android usando tecnologias desenvolvidas para comunicação em tempo real.
+
+⚡ Baixa latência
+
+A transmissão utiliza WebRTC e áudio Opus, buscando uma conexão direta entre os dispositivos sempre que possível para reduzir atrasos durante a reprodução.
+
+🔗 Conexão simples
+
+Crie uma sessão no computador, conecte o celular e comece a ouvir. O SonicRelay gerencia a conexão entre os dispositivos sem exigir configurações complicadas de rede.
+
+📱 Principais recursos
+
+• Transmissão de áudio do Windows para Android
+• Áudio em tempo real com baixa latência
+• WebRTC com codec Opus
+• Conexão direta entre dispositivos quando disponível
+• Relay automático quando a rede exigir
+• Sessões protegidas entre dispositivos
+• Código temporário para conexão
+• Suporte a múltiplos dispositivos
+• Status da conexão e da sessão
+• Reconexão em caso de interrupções de rede
+
+🖥️ Aplicativo para Windows
+
+Para transmitir o áudio, é necessário instalar também o SonicRelay para Windows no computador.
+
+O aplicativo Windows funciona como transmissor do áudio, enquanto o SonicRelay no Android recebe e reproduz a transmissão.
+
+Para quem é o SonicRelay?
+
+O SonicRelay é uma alternativa simples para quem procura:
+
+• ouvir o áudio do PC no celular
+• transmitir som do Windows para Android
+• acompanhar músicas, vídeos ou jogos longe do computador
+• transmitir áudio entre dispositivos com baixa latência
+• evitar soluções de streaming mais pesadas para uma tarefa simples
+
+Seu PC reproduz. Seu celular escuta. SonicRelay conecta os dois.
