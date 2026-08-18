@@ -4,6 +4,7 @@ import 'package:device_info_plus/device_info_plus.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/diagnostics/diagnostic_log.dart';
 import '../../core/http/auth_interceptor.dart';
@@ -204,6 +205,16 @@ class CoturnOverrideNotifier extends Notifier<String?> {
 final devicePlatformProvider = Provider<String>(
   (ref) => Platform.operatingSystem,
 );
+
+/// Opens an external URL (currently the privacy policy). Behind a provider so a
+/// widget test can assert what the app tried to open without driving the
+/// url_launcher platform channel, which has no implementation under
+/// `flutter test`. Returns false when no handler exists for the URL.
+final externalLinkLauncherProvider =
+    Provider<Future<bool> Function(Uri)>((ref) {
+  return (uri) =>
+      launchUrl(uri, mode: LaunchMode.externalApplication);
+});
 
 /// Resolves this device's human name (model or user-assigned name) so the
 /// publisher's paired-viewers list can show "Pixel 8" instead of a GUID or a

@@ -12,6 +12,7 @@ import '../../../core/widgets/sonic_button.dart';
 import '../../../core/widgets/sonic_card.dart';
 import 'widgets/coturn_url_field.dart';
 import 'widgets/keep_playing_toggle.dart';
+import 'widgets/privacy_policy_link.dart';
 import 'widgets/relay_mode_toggle.dart';
 import 'widgets/server_url_field.dart';
 
@@ -144,6 +145,8 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                     style: Theme.of(context).textTheme.bodySmall,
                   ),
                   const SizedBox(height: AppSpacing.md),
+                  const PrivacyPolicyLink(),
+                  const SizedBox(height: AppSpacing.sm),
                   const Text(
                     'SonicRelay mobile viewer',
                     textAlign: TextAlign.center,
