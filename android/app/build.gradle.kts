@@ -1,3 +1,4 @@
+import com.android.build.gradle.internal.api.ApkVariantOutputImpl
 import java.util.Properties
 
 plugins {
@@ -40,6 +41,18 @@ android {
         versionName = flutter.versionName
     }
 
+    // `play` carries the Google Play build; `fdroid` carries the build F-Droid
+    // compiles from source and must stay free of proprietary dependencies.
+    flavorDimensions += "distribution"
+    productFlavors {
+        create("play") {
+            dimension = "distribution"
+        }
+        create("fdroid") {
+            dimension = "distribution"
+        }
+    }
+
     signingConfigs {
         create("release") {
             if (hasReleaseKeystore) {
@@ -59,6 +72,20 @@ android {
                 } else {
                     signingConfigs.getByName("debug")
                 }
+        }
+    }
+}
+
+// Each ABI split gets its own versionCode so a single release can publish one
+// APK per ABI. Keep this in sync with `VercodeOperation` in the F-Droid
+// metadata (`10 * %c + <abi code>`).
+val abiCodes = mapOf("armeabi-v7a" to 1, "arm64-v8a" to 2, "x86_64" to 3)
+android.applicationVariants.configureEach {
+    val variant = this
+    variant.outputs.forEach { output ->
+        val abiVersionCode = abiCodes[output.filters.find { it.filterType == "ABI" }?.identifier]
+        if (abiVersionCode != null) {
+            (output as ApkVariantOutputImpl).versionCodeOverride = variant.versionCode * 10 + abiVersionCode
         }
     }
 }

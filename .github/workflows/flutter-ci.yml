@@ -78,23 +78,23 @@ jobs:
         run: flutter pub get
 
       - name: Build release APK
-        run: flutter build apk --release --build-number "${{ github.run_number }}"
+        run: flutter build apk --release --flavor play --build-number "${{ github.run_number }}"
 
       - name: Build release AAB
-        run: flutter build appbundle --release --build-number "${{ github.run_number }}"
+        run: flutter build appbundle --release --flavor play --build-number "${{ github.run_number }}"
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: sonic-relay-apk
-          path: build/app/outputs/flutter-apk/app-release.apk
+          path: build/app/outputs/flutter-apk/app-play-release.apk
           if-no-files-found: error
 
       - name: Upload AAB artifact
         uses: actions/upload-artifact@v4
         with:
           name: sonic-relay-aab
-          path: build/app/outputs/bundle/release/app-release.aab
+          path: build/app/outputs/bundle/playRelease/app-play-release.aab
           if-no-files-found: error
 
   release:
@@ -130,8 +130,8 @@ jobs:
 
       - name: Rename release artifacts
         run: |
-          mv dist/app-release.apk "dist/sonic-relay-${{ steps.version.outputs.tag }}.apk"
-          mv dist/app-release.aab "dist/sonic-relay-${{ steps.version.outputs.tag }}.aab"
+          mv dist/app-play-release.apk "dist/sonic-relay-${{ steps.version.outputs.tag }}.apk"
+          mv dist/app-play-release.aab "dist/sonic-relay-${{ steps.version.outputs.tag }}.aab"
 
       - name: Publish release
         uses: softprops/action-gh-release@v2
