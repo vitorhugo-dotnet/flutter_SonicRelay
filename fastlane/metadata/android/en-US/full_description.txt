@@ -1,0 +1,25 @@
+SonicRelay streams the audio playing on your computer straight to your phone, with the low latency of a direct peer-to-peer connection.
+
+Start a session on the SonicRelay publisher running on your PC, scan or type the temporary session code on your phone, and listen. Audio travels directly between the two devices over WebRTC — the server only handles sign-in, sessions and signalling, and never relays your audio.
+
+Features
+
+* Low-latency audio over WebRTC, peer-to-peer whenever the network allows.
+* Join a session with a short temporary code.
+* Live connection monitor: signalling state, ICE state, estimated latency, jitter, and whether the stream is direct or relayed.
+* Background playback: keep listening with the screen off or another app in front, with a persistent notification offering Open, Stop and Reconnect.
+* Device management: see and revoke the devices registered to your account.
+* Dark Material 3 interface.
+
+Bring your own server
+
+SonicRelay is not tied to a single provider. The server address is configurable inside the app, and the backend is free software you can host yourself:
+
+* Backend: https://github.com/vitorhugo-java/dotnet_SonicRelay
+* Windows publisher: https://github.com/vitorhugo-java/windows_SonicRelay
+
+You will need a SonicRelay account on whichever server you point the app at, plus the publisher running on the machine whose audio you want to hear.
+
+Privacy
+
+Access tokens and the device identifier are kept in Android's encrypted storage and are never written to logs or plain preferences. The app only receives audio: it never opens your microphone and never sends media of its own.
