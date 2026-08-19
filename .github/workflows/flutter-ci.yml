@@ -212,6 +212,28 @@ jobs:
           path: build/app/outputs/bundle/playRelease/app-play-release.aab
           if-no-files-found: error
 
+      # Same flavor and split scheme F-Droid's build server produces from
+      # source, published so `Binaries`/`binary:` in the F-Droid metadata can
+      # verify a byte-for-byte match and adopt this signing key.
+      - name: Build release APKs (F-Droid, split per ABI)
+        run: |
+          flutter build apk \
+            --release \
+            --flavor fdroid \
+            --split-per-abi \
+            --build-name "${{ needs.version.outputs.version_name }}" \
+            --build-number "${{ needs.version.outputs.version_code }}"
+
+      - name: Upload F-Droid APK artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: sonic-relay-fdroid-apks
+          path: |
+            build/app/outputs/flutter-apk/app-armeabi-v7a-fdroid-release.apk
+            build/app/outputs/flutter-apk/app-arm64-v8a-fdroid-release.apk
+            build/app/outputs/flutter-apk/app-x86_64-fdroid-release.apk
+          if-no-files-found: error
+
   release:
     name: Persist version and publish GitHub Release
     needs: [version, checks, build-android]
@@ -240,10 +262,19 @@ jobs:
           name: sonic-relay-aab
           path: dist
 
+      - name: Download F-Droid APK artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: sonic-relay-fdroid-apks
+          path: dist
+
       - name: Rename release artifacts
         run: |
           mv dist/app-play-release.apk "dist/sonic-relay-${{ needs.version.outputs.tag }}.apk"
           mv dist/app-play-release.aab "dist/sonic-relay-${{ needs.version.outputs.tag }}.aab"
+          mv dist/app-armeabi-v7a-fdroid-release.apk "dist/sonic-relay-armeabi-v7a-fdroid-${{ needs.version.outputs.tag }}.apk"
+          mv dist/app-arm64-v8a-fdroid-release.apk "dist/sonic-relay-arm64-v8a-fdroid-${{ needs.version.outputs.tag }}.apk"
+          mv dist/app-x86_64-fdroid-release.apk "dist/sonic-relay-x86_64-fdroid-${{ needs.version.outputs.tag }}.apk"
 
       - name: Extract changelog for this release
         id: changelog
@@ -318,6 +349,9 @@ jobs:
           files: |
             dist/sonic-relay-${{ needs.version.outputs.tag }}.apk
             dist/sonic-relay-${{ needs.version.outputs.tag }}.aab
+            dist/sonic-relay-armeabi-v7a-fdroid-${{ needs.version.outputs.tag }}.apk
+            dist/sonic-relay-arm64-v8a-fdroid-${{ needs.version.outputs.tag }}.apk
+            dist/sonic-relay-x86_64-fdroid-${{ needs.version.outputs.tag }}.apk
 
   deploy-play:
     name: Deploy Google Play internal testing

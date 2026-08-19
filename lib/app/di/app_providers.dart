@@ -13,6 +13,7 @@ import '../../core/http/dio_client.dart';
 import '../../core/network/network_monitor.dart';
 import '../../core/storage/background_playback_storage.dart';
 import '../../core/storage/coturn_override_storage.dart';
+import '../../core/storage/onboarding_storage.dart';
 import '../../core/storage/relay_mode_storage.dart';
 import '../../core/storage/server_config_storage.dart';
 import '../../core/storage/theme_mode_storage.dart';
@@ -228,6 +229,33 @@ class CoturnOverrideNotifier extends Notifier<String?> {
     final normalized = (url == null || url.trim().isEmpty) ? null : url.trim();
     await ref.read(coturnOverrideStorageProvider).write(normalized);
     state = normalized;
+  }
+}
+
+final onboardingStorageProvider = Provider<OnboardingStorage>(
+  (ref) => OnboardingStorage(ref.watch(secureStorageProvider)),
+);
+
+/// Whether the viewer has completed (or skipped) the first-use onboarding.
+/// Persisted; false by default so a fresh install (or one with app data
+/// cleared) always sees it once. Seeded at startup by an override in
+/// `main()`.
+final onboardingCompletedProvider =
+    NotifierProvider<OnboardingCompletedNotifier, bool>(
+      OnboardingCompletedNotifier.new,
+    );
+
+class OnboardingCompletedNotifier extends Notifier<bool> {
+  OnboardingCompletedNotifier([this._initial = false]);
+
+  final bool _initial;
+
+  @override
+  bool build() => _initial;
+
+  Future<void> complete() async {
+    await ref.read(onboardingStorageProvider).write(true);
+    state = true;
   }
 }
 
