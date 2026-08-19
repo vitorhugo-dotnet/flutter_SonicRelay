@@ -2,8 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../../app/theme/app_colors.dart';
 import '../../../app/theme/app_spacing.dart';
+import '../../../app/theme/sonic_colors.dart';
 import '../../../core/widgets/connection_badge.dart';
 import '../../../core/widgets/sonic_card.dart';
 import '../../signaling/data/signaling_client.dart';
@@ -153,38 +153,46 @@ class ListenerPage extends ConsumerWidget {
   _Banner? _banner(ListenerConnectionState state) => switch (state) {
     ListenerConnectionState.waitingForOffer => const _Banner(
       icon: Icons.hourglass_top_rounded,
-      color: AppColors.warning,
+      tone: _BannerTone.warning,
       message: 'Waiting for the publisher to start streaming…',
     ),
     ListenerConnectionState.reconnecting => const _Banner(
       icon: Icons.wifi_tethering_error_rounded,
-      color: AppColors.warning,
+      tone: _BannerTone.warning,
       message: 'Connection dropped — trying to reconnect…',
     ),
     ListenerConnectionState.ended => const _Banner(
       icon: Icons.stop_circle_outlined,
-      color: AppColors.textSecondary,
+      tone: _BannerTone.neutral,
       message: 'The publisher ended this session.',
     ),
     ListenerConnectionState.failed => const _Banner(
       icon: Icons.error_outline_rounded,
-      color: AppColors.danger,
+      tone: _BannerTone.danger,
       message: "Couldn't connect to the stream. Try rejoining.",
     ),
     _ => null,
   };
 }
 
+enum _BannerTone { warning, danger, neutral }
+
 class _Banner {
   const _Banner({
     required this.icon,
-    required this.color,
+    required this.tone,
     required this.message,
   });
 
   final IconData icon;
-  final Color color;
+  final _BannerTone tone;
   final String message;
+
+  Color color(BuildContext context) => switch (tone) {
+    _BannerTone.warning => context.sonicColors.warning,
+    _BannerTone.danger => Theme.of(context).colorScheme.error,
+    _BannerTone.neutral => Theme.of(context).colorScheme.onSurfaceVariant,
+  };
 }
 
 class _StateBanner extends StatelessWidget {
@@ -194,17 +202,18 @@ class _StateBanner extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final color = banner.color(context);
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: banner.color.withValues(alpha: 0.10),
-        border: Border.all(color: banner.color.withValues(alpha: 0.4)),
+        color: color.withValues(alpha: 0.10),
+        border: Border.all(color: color.withValues(alpha: 0.4)),
         borderRadius: BorderRadius.circular(16),
       ),
       child: Padding(
         padding: const EdgeInsets.all(AppSpacing.md),
         child: Row(
           children: [
-            Icon(banner.icon, color: banner.color),
+            Icon(banner.icon, color: color),
             const SizedBox(width: AppSpacing.md),
             Expanded(
               child: Text(
@@ -236,7 +245,7 @@ class _MetricCard extends StatelessWidget {
       padding: const EdgeInsets.all(AppSpacing.md),
       child: Row(
         children: [
-          Icon(icon, color: AppColors.accent),
+          Icon(icon, color: Theme.of(context).colorScheme.primary),
           const SizedBox(width: AppSpacing.md),
           Expanded(
             child: Text(label, style: Theme.of(context).textTheme.bodyMedium),

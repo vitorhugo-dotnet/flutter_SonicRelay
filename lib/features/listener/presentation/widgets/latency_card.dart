@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
-import '../../../../app/theme/app_colors.dart';
 import '../../../../app/theme/app_spacing.dart';
+import '../../../../app/theme/sonic_colors.dart';
 import '../../../../core/webrtc/rtc_peer_connection_factory.dart';
 import '../../../../core/widgets/sonic_card.dart';
 
@@ -101,7 +101,7 @@ class _Metric extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, color: AppColors.accent),
+          Icon(icon, color: Theme.of(context).colorScheme.primary),
           const SizedBox(height: AppSpacing.sm),
           Text(label, style: textTheme.bodyMedium),
           const SizedBox(height: AppSpacing.xs),
@@ -119,10 +119,14 @@ class _TransportChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final sonicColors = context.sonicColors;
     final (label, color) = switch (transport) {
-      RtcTransportMode.direct => ('Direct', AppColors.success),
-      RtcTransportMode.relay => ('Relay', AppColors.warning),
-      RtcTransportMode.unknown => ('Unknown', AppColors.textSecondary),
+      RtcTransportMode.direct => ('Direct', sonicColors.success),
+      RtcTransportMode.relay => ('Relay', sonicColors.warning),
+      RtcTransportMode.unknown => (
+        'Unknown',
+        Theme.of(context).colorScheme.onSurfaceVariant,
+      ),
     };
     return Semantics(
       label: 'Transport mode: $label',

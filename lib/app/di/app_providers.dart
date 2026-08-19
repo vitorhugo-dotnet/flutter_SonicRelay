@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:dio/dio.dart';
+import 'package:flutter/material.dart' show ThemeMode;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -15,6 +16,7 @@ import '../../core/storage/coturn_override_storage.dart';
 import '../../core/storage/onboarding_storage.dart';
 import '../../core/storage/relay_mode_storage.dart';
 import '../../core/storage/server_config_storage.dart';
+import '../../core/storage/theme_mode_storage.dart';
 import '../../core/webrtc/relay_modes.dart';
 import '../../core/webrtc/relay_settings_api.dart';
 import '../../features/background/data/foreground_stream_service.dart';
@@ -112,6 +114,32 @@ class RelayModeNotifier extends Notifier<String> {
 
   Future<void> set(String mode) async {
     await ref.read(relayModeStorageProvider).write(mode);
+    state = mode;
+  }
+}
+
+final themeModeStorageProvider = Provider<ThemeModeStorage>(
+  (ref) => ThemeModeStorage(ref.watch(secureStorageProvider)),
+);
+
+/// The viewer's appearance preference, applied directly to
+/// `MaterialApp.themeMode`. Local-only, like [relayModeProvider]; unlike it,
+/// there is no backend counterpart to sync — appearance is a per-device
+/// display setting, not something meaningful to share across paired devices.
+final themeModeProvider = NotifierProvider<ThemeModeNotifier, ThemeMode>(
+  ThemeModeNotifier.new,
+);
+
+class ThemeModeNotifier extends Notifier<ThemeMode> {
+  ThemeModeNotifier([this._initial = ThemeMode.system]);
+
+  final ThemeMode _initial;
+
+  @override
+  ThemeMode build() => _initial;
+
+  Future<void> set(ThemeMode mode) async {
+    await ref.read(themeModeStorageProvider).write(mode);
     state = mode;
   }
 }

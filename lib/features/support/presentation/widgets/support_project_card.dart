@@ -3,8 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../app/di/app_providers.dart';
 import '../../../../app/env/app_config.dart';
-import '../../../../app/theme/app_colors.dart';
 import '../../../../app/theme/app_spacing.dart';
+import '../../../../app/theme/sonic_colors.dart';
 
 /// Invites the listener to fund the infrastructure the app runs on.
 ///
@@ -76,34 +76,35 @@ class _DonationButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     return SizedBox(
       height: 56,
       child: DecoratedBox(
         decoration: BoxDecoration(
-          color: AppColors.accentMuted,
+          color: context.sonicColors.accentMuted,
           borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: AppColors.accent),
+          border: Border.all(color: colorScheme.primary),
         ),
         child: Material(
           color: Colors.transparent,
           child: InkWell(
             onTap: onPressed,
             borderRadius: BorderRadius.circular(16),
-            child: const Row(
+            child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Text('☕', style: TextStyle(fontSize: 22)),
-                SizedBox(width: AppSpacing.sm),
+                const Text('☕', style: TextStyle(fontSize: 22)),
+                const SizedBox(width: AppSpacing.sm),
                 Text(
                   'Buy me a coffee',
                   style: TextStyle(
-                    color: AppColors.textPrimary,
+                    color: colorScheme.onSurface,
                     fontSize: 16,
                     fontWeight: FontWeight.w700,
                   ),
                 ),
-                SizedBox(width: AppSpacing.sm),
-                Icon(Icons.favorite, color: AppColors.warning, size: 18),
+                const SizedBox(width: AppSpacing.sm),
+                Icon(Icons.favorite, color: context.sonicColors.warning, size: 18),
               ],
             ),
           ),
