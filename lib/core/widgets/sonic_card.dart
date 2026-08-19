@@ -1,7 +1,5 @@
 import 'package:flutter/material.dart';
 
-import '../../app/theme/app_colors.dart';
-
 class SonicCard extends StatelessWidget {
   const SonicCard({required this.child, this.padding, super.key});
 
@@ -10,16 +8,20 @@ class SonicCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    // A light surface needs a much lighter shadow than a dark one to avoid
+    // reading as a heavy smudge instead of a subtle lift off the background.
+    final shadowAlpha = colorScheme.brightness == Brightness.dark ? 0.19 : 0.08;
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: AppColors.surface,
-        border: Border.all(color: AppColors.border),
+        color: colorScheme.surface,
+        border: Border.all(color: colorScheme.outline),
         borderRadius: BorderRadius.circular(20),
-        boxShadow: const [
+        boxShadow: [
           BoxShadow(
-            color: Color(0x30000000),
+            color: Colors.black.withValues(alpha: shadowAlpha),
             blurRadius: 24,
-            offset: Offset(0, 12),
+            offset: const Offset(0, 12),
           ),
         ],
       ),

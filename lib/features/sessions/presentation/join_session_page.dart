@@ -3,7 +3,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../app/di/app_providers.dart';
-import '../../../app/theme/app_colors.dart';
 import '../../../app/theme/app_spacing.dart';
 import '../../../core/widgets/connection_badge.dart';
 import '../../../core/widgets/sonic_button.dart';
@@ -84,19 +83,19 @@ class JoinSessionPage extends ConsumerWidget {
                               .updateCode,
                         ),
                         const SizedBox(height: AppSpacing.md),
-                        const Row(
+                        Row(
                           children: [
                             Icon(
                               Icons.shield_outlined,
                               size: 18,
-                              color: AppColors.textSecondary,
+                              color: Theme.of(context).colorScheme.onSurfaceVariant,
                             ),
-                            SizedBox(width: AppSpacing.sm),
+                            const SizedBox(width: AppSpacing.sm),
                             Expanded(
                               child: Text(
                                 'Codes are temporary and shared by your publisher.',
                                 style: TextStyle(
-                                  color: AppColors.textSecondary,
+                                  color: Theme.of(context).colorScheme.onSurfaceVariant,
                                 ),
                               ),
                             ),

@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 
-import '../../../../app/theme/app_colors.dart';
 import '../../../../app/theme/app_spacing.dart';
 import '../../../../core/widgets/sonic_button.dart';
 import '../../../../core/widgets/sonic_card.dart';
@@ -20,7 +19,10 @@ class SessionStatusCard extends StatelessWidget {
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Icon(Icons.error_outline_rounded, color: AppColors.danger),
+              Icon(
+                Icons.error_outline_rounded,
+                color: Theme.of(context).colorScheme.error,
+              ),
               const SizedBox(width: AppSpacing.sm),
               Expanded(child: Text(message)),
             ],

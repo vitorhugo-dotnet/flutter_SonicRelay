@@ -69,7 +69,9 @@ class _SonicRelayAppState extends ConsumerState<SonicRelayApp>
     return MaterialApp.router(
       title: 'SonicRelay',
       debugShowCheckedModeBanner: false,
-      theme: AppTheme.dark,
+      theme: AppTheme.light,
+      darkTheme: AppTheme.dark,
+      themeMode: ref.watch(themeModeProvider),
       routerConfig: ref.watch(appRouterProvider),
     );
   }

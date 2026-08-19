@@ -6,7 +6,6 @@ import 'package:go_router/go_router.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../../../app/di/app_providers.dart';
-import '../../../app/theme/app_colors.dart';
 import '../../../app/theme/app_spacing.dart';
 import '../../../core/widgets/sonic_button.dart';
 import '../../../core/widgets/sonic_card.dart';
@@ -16,6 +15,7 @@ import 'widgets/keep_playing_toggle.dart';
 import 'widgets/privacy_policy_link.dart';
 import 'widgets/relay_mode_toggle.dart';
 import 'widgets/server_url_field.dart';
+import 'widgets/theme_mode_selector.dart';
 
 class SettingsPage extends ConsumerStatefulWidget {
   const SettingsPage({super.key});
@@ -85,7 +85,12 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                         const _SettingsRow(
                           icon: Icons.dark_mode_outlined,
                           title: 'Appearance',
-                          subtitle: 'Dark theme',
+                          subtitle: 'Theme',
+                        ),
+                        const SizedBox(height: AppSpacing.sm),
+                        const Material(
+                          color: Colors.transparent,
+                          child: ThemeModeSelector(),
                         ),
                         Consumer(
                           builder: (context, ref, _) {
@@ -150,10 +155,12 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                   const SizedBox(height: AppSpacing.md),
                   const PrivacyPolicyLink(),
                   const SizedBox(height: AppSpacing.sm),
-                  const Text(
+                  Text(
                     'SonicRelay mobile viewer',
                     textAlign: TextAlign.center,
-                    style: TextStyle(color: AppColors.textSecondary),
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
                   ),
                 ],
               ),
@@ -344,7 +351,7 @@ class _SettingsRow extends StatelessWidget {
   Widget build(BuildContext context) {
     return Row(
       children: [
-        Icon(icon, color: AppColors.accent),
+        Icon(icon, color: Theme.of(context).colorScheme.primary),
         const SizedBox(width: AppSpacing.md),
         Expanded(
           child: Column(

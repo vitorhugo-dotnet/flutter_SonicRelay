@@ -10,6 +10,7 @@ import 'core/storage/background_playback_storage.dart';
 import 'core/storage/coturn_override_storage.dart';
 import 'core/storage/relay_mode_storage.dart';
 import 'core/storage/server_config_storage.dart';
+import 'core/storage/theme_mode_storage.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -24,6 +25,7 @@ Future<void> main() async {
   ).read();
   final savedKeepPlaying =
       await const BackgroundPlaybackStorage(secureStorage).read();
+  final savedThemeMode = await const ThemeModeStorage(secureStorage).read();
   final diagnosticsDirectory = (await getApplicationSupportDirectory()).path;
 
   runApp(
@@ -37,6 +39,7 @@ Future<void> main() async {
         backgroundPlaybackEnabledProvider.overrideWith(
           () => BackgroundPlaybackNotifier(savedKeepPlaying),
         ),
+        themeModeProvider.overrideWith(() => ThemeModeNotifier(savedThemeMode)),
         diagnosticsDirectoryProvider.overrideWithValue(diagnosticsDirectory),
       ],
       child: const SonicRelayApp(),

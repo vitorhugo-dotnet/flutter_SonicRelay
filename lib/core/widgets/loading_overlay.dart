@@ -18,7 +18,10 @@ class LoadingOverlay extends StatelessWidget {
       children: [
         child,
         if (isLoading) ...[
-          const ModalBarrier(dismissible: false, color: Color(0xB3070B12)),
+          // A neutral translucent scrim, not tied to either theme's surface
+          // color — the same treatment Material dialogs/modals use regardless
+          // of brightness.
+          ModalBarrier(dismissible: false, color: Colors.black.withValues(alpha: 0.55)),
           Center(
             child: Column(
               mainAxisSize: MainAxisSize.min,
