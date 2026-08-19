@@ -127,6 +127,13 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                   const _DiagnosticsSection(),
                   const SizedBox(height: AppSpacing.xl),
                   SonicButton(
+                    label: 'How to use',
+                    icon: Icons.help_outline_rounded,
+                    isSecondary: true,
+                    onPressed: () => context.push('/how-to-use'),
+                  ),
+                  const SizedBox(height: AppSpacing.md),
+                  SonicButton(
                     label: 'Manage pairings',
                     icon: Icons.link_rounded,
                     isSecondary: true,

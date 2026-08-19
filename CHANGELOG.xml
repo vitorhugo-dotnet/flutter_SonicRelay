@@ -1,7 +1,9 @@
 <en-US>
-- Discover and join public rooms right from the Join screen.
+- Added a short first-time onboarding explaining how SonicRelay works and how to pair with a computer.
+- Added a "How to use" help screen, reachable anytime from the pairing screen's ? button and from Settings.
 </en-US>
 
 <pt-BR>
-- Descubra e entre em salas públicas direto na tela de entrada.
+- Adicionado um onboarding curto na primeira abertura explicando como o SonicRelay funciona e como parear com um computador.
+- Adicionada uma tela de ajuda "Como usar", acessível a qualquer momento pelo botão ? da tela de pareamento e pelas Configurações.
 </pt-BR>

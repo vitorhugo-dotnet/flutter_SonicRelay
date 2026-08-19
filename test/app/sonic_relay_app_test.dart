@@ -49,6 +49,9 @@ class _FakeRelaySettingsApi extends RelaySettingsApi {
 ProviderScope testApp() => ProviderScope(
   overrides: [
     deviceReadinessProvider.overrideWith(_ReadyReadinessNotifier.new),
+    onboardingCompletedProvider.overrideWith(
+      () => OnboardingCompletedNotifier(true),
+    ),
     diagnosticsDirectoryProvider.overrideWithValue(
       _testDiagnosticsDirectory(),
     ),
@@ -168,6 +171,9 @@ void main() {
     final container = ProviderContainer(
       overrides: [
         deviceReadinessProvider.overrideWith(_ReadyReadinessNotifier.new),
+        onboardingCompletedProvider.overrideWith(
+          () => OnboardingCompletedNotifier(true),
+        ),
         diagnosticsDirectoryProvider.overrideWithValue(
           _testDiagnosticsDirectory(),
         ),
