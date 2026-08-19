@@ -135,6 +135,7 @@ class _QrScannerPageState extends State<QrScannerPage>
     with WidgetsBindingObserver {
   late final PairingScannerController _controller;
   bool _accepted = false;
+  String? _lastRejectedRaw;
 
   @override
   void initState() {
@@ -152,10 +153,23 @@ class _QrScannerPageState extends State<QrScannerPage>
     // scanner alone so a background/foreground cycle during navigation can't
     // race a stray restart back in.
     if (_accepted) return;
-    if (state == AppLifecycleState.resumed) {
-      unawaited(_startScanner());
-    } else {
-      unawaited(_controller.stop());
+    switch (state) {
+      case AppLifecycleState.resumed:
+        unawaited(_startScanner());
+      case AppLifecycleState.inactive:
+        // Android reports `inactive` for transient system UI that overlays the
+        // app without backgrounding it - most notably the camera permission
+        // prompt shown the first time this page opens. Tearing the scanner
+        // down here raced camera setup against that prompt: dismissing the
+        // dialog could leave `CameraController.initialize()` disposed mid-flight,
+        // so the widget never started its image stream and no QR was ever
+        // detected. Only stop for lifecycle states that mean the app is
+        // actually no longer visible.
+        break;
+      case AppLifecycleState.hidden:
+      case AppLifecycleState.paused:
+      case AppLifecycleState.detached:
+        unawaited(_controller.stop());
     }
   }
 
@@ -173,6 +187,21 @@ class _QrScannerPageState extends State<QrScannerPage>
     try {
       PairingChallengePayload.parse(raw);
     } on FormatException {
+      // The camera keeps streaming frames of the same code while it's in
+      // view, so only surface the error once per distinct rejected payload
+      // rather than re-showing a SnackBar on every scan tick.
+      if (raw != _lastRejectedRaw) {
+        _lastRejectedRaw = raw;
+        if (mounted) {
+          ScaffoldMessenger.of(context)
+            ..hideCurrentSnackBar()
+            ..showSnackBar(
+              const SnackBar(
+                content: Text('That QR code is not a valid pairing code.'),
+              ),
+            );
+        }
+      }
       return;
     }
 
