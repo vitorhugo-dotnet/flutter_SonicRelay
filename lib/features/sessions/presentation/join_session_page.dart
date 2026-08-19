@@ -39,6 +39,11 @@ class JoinSessionPage extends ConsumerWidget {
         title: const Text('Join session'),
         actions: [
           IconButton(
+            tooltip: 'How to use',
+            onPressed: () => context.push('/how-to-use'),
+            icon: const Icon(Icons.help_outline_rounded),
+          ),
+          IconButton(
             tooltip: 'Settings',
             onPressed: () => context.push('/settings'),
             icon: const Icon(Icons.tune_rounded),
@@ -102,13 +107,38 @@ class JoinSessionPage extends ConsumerWidget {
                           ],
                         ),
                         const SizedBox(height: AppSpacing.lg),
-                        SonicButton(
-                          label: 'Join stream',
-                          icon: Icons.headphones_rounded,
-                          isLoading: state.isJoining,
-                          onPressed: ref
-                              .read(joinSessionViewModelProvider.notifier)
-                              .join,
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Expanded(
+                              child: SonicButton(
+                                label: 'Join stream',
+                                icon: Icons.headphones_rounded,
+                                isLoading: state.isJoining,
+                                onPressed: ref
+                                    .read(joinSessionViewModelProvider.notifier)
+                                    .join,
+                              ),
+                            ),
+                            const SizedBox(width: AppSpacing.sm),
+                            SizedBox(
+                              width: 54,
+                              height: 54,
+                              child: OutlinedButton(
+                                onPressed: () => context.push('/pair'),
+                                style: OutlinedButton.styleFrom(
+                                  padding: EdgeInsets.zero,
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(16),
+                                  ),
+                                ),
+                                child: const Tooltip(
+                                  message: 'Pair a new device',
+                                  child: Icon(Icons.devices_other_rounded),
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
                       ],
                     ),

@@ -158,6 +158,76 @@ void main() {
     },
   );
 
+  testWidgets('exposes a how-to-use entry point that opens /how-to-use', (
+    tester,
+  ) async {
+    final router = GoRouter(
+      initialLocation: '/join',
+      routes: [
+        GoRoute(path: '/join', builder: (_, _) => const JoinSessionPage()),
+        GoRoute(
+          path: '/how-to-use',
+          builder: (_, _) => const Scaffold(body: Text('How to use page')),
+        ),
+      ],
+    );
+    addTearDown(router.dispose);
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          discoverableSessionsProvider.overrideWith(
+            (ref) => Stream.value(const []),
+          ),
+          publicRoomProvider.overrideWith(
+            (ref) => Stream.value(const PublicRoomInfo.disabled()),
+          ),
+        ],
+        child: MaterialApp.router(routerConfig: router),
+      ),
+    );
+
+    await tester.tap(find.byTooltip('How to use'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('How to use page'), findsOneWidget);
+  });
+
+  testWidgets('exposes a pair-a-new-device entry point that opens /pair', (
+    tester,
+  ) async {
+    final router = GoRouter(
+      initialLocation: '/join',
+      routes: [
+        GoRoute(path: '/join', builder: (_, _) => const JoinSessionPage()),
+        GoRoute(
+          path: '/pair',
+          builder: (_, _) => const Scaffold(body: Text('Pair device page')),
+        ),
+      ],
+    );
+    addTearDown(router.dispose);
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          discoverableSessionsProvider.overrideWith(
+            (ref) => Stream.value(const []),
+          ),
+          publicRoomProvider.overrideWith(
+            (ref) => Stream.value(const PublicRoomInfo.disabled()),
+          ),
+        ],
+        child: MaterialApp.router(routerConfig: router),
+      ),
+    );
+
+    await tester.tap(find.byTooltip('Pair a new device'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Pair device page'), findsOneWidget);
+  });
+
   testWidgets('the donation card sits below the join controls', (tester) async {
     // The relay is funded out of pocket, so the ask lives on the screen every
     // launch lands on — but under the join card, never competing with it.

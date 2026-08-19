@@ -1,11 +1,7 @@
 <en-US>
-- Fixed the pairing QR scanner so codes are detected reliably on the first scan, with clear errors for invalid codes.
-- Public Radio is now available directly on the Pairing screen, without a publisher, QR code, or device pairing.
-- Added Light Mode with System, Light, and Dark options in Settings > Appearance.
+- The Join session screen now has quick-access buttons for "How to use" and pairing a new device, matching the Pair device screen.
 </en-US>
 
 <pt-BR>
-- Corrigido o leitor de QR de pareamento para detectar códigos corretamente na primeira leitura e exibir erros claros para códigos inválidos.
-- A Rádio Pública agora está disponível diretamente na tela de pareamento, sem precisar de publicador, QR code ou dispositivo pareado.
-- Adicionado o Modo Claro com as opções Sistema, Claro e Escuro em Configurações > Aparência.
+- A tela de entrar em sessão agora tem botões de acesso rápido para "Como usar" e para parear um novo dispositivo, igual à tela de pareamento.
 </pt-BR>
