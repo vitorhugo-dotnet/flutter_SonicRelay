@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -70,7 +72,37 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       ),
     ],
   );
-  ref.listen(deviceReadinessProvider, (_, _) => router.refresh());
+  // The splash stays up at least this long even when device identity
+  // restores almost instantly, so its animation never just flashes for a
+  // frame before the redirect above whisks it away.
+  const minimumSplashDuration = Duration(seconds: 1);
+  DateTime? restoringSince =
+      ref.read(deviceReadinessProvider).status ==
+          DeviceReadinessStatus.restoring
+      ? DateTime.now()
+      : null;
+  Timer? splashHoldTimer;
+
+  ref.listen(deviceReadinessProvider, (_, next) {
+    if (next.status == DeviceReadinessStatus.restoring) {
+      restoringSince ??= DateTime.now();
+      router.refresh();
+      return;
+    }
+    final since = restoringSince;
+    restoringSince = null;
+    splashHoldTimer?.cancel();
+    if (since == null) {
+      router.refresh();
+      return;
+    }
+    final remaining = minimumSplashDuration - DateTime.now().difference(since);
+    if (remaining <= Duration.zero) {
+      router.refresh();
+    } else {
+      splashHoldTimer = Timer(remaining, router.refresh);
+    }
+  });
   ref.listen(pairingViewModelProvider, (previous, next) {
     // Only emissions that carry an authoritative pairing list may drive readiness.
     // A transient loading/submitting emission — and a failed load, whose list can be
@@ -86,7 +118,10 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       router.go('/join');
     }
   });
-  ref.onDispose(router.dispose);
+  ref.onDispose(() {
+    splashHoldTimer?.cancel();
+    router.dispose();
+  });
   return router;
 });
 
