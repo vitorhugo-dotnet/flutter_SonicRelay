@@ -1,6 +1,7 @@
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_zxing/flutter_zxing.dart';
 import 'package:sonic_relay/features/pairing/presentation/qr_scanner_page.dart';
 
 const validPayload =
@@ -57,6 +58,40 @@ void main() {
     expect(controller.stopCalls, 1);
   });
 
+  testWidgets('an unparseable QR surfaces an explicit error and keeps scanning', (
+    tester,
+  ) async {
+    final controller = _FakeScannerController(raw: 'https://example.com');
+    var accepted = 0;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: QrScannerPage(
+          scannerController: controller,
+          onAccepted: (_) => accepted += 1,
+        ),
+      ),
+    );
+
+    await tester.tap(find.byKey(const Key('scanner-detect')));
+    await tester.pump();
+
+    expect(
+      find.text('That QR code is not a valid pairing code.'),
+      findsOneWidget,
+    );
+    expect(accepted, 0);
+    expect(controller.stopCalls, 0);
+
+    // Re-scanning the same rejected payload does not queue a second SnackBar.
+    await tester.tap(find.byKey(const Key('scanner-detect')));
+    await tester.pump();
+    expect(
+      find.text('That QR code is not a valid pairing code.'),
+      findsOneWidget,
+    );
+  });
+
   testWidgets('camera denial keeps a manual fallback', (tester) async {
     final controller = _FakeScannerController(permissionDenied: true);
     var manualFallbacks = 0;
@@ -77,7 +112,7 @@ void main() {
     expect(manualFallbacks, 1);
   });
 
-  testWidgets('stops for inactive paused detached and resumes safely', (
+  testWidgets('stops for hidden paused detached and resumes safely', (
     tester,
   ) async {
     final controller = _FakeScannerController();
@@ -89,7 +124,7 @@ void main() {
     expect(controller.startCalls, 1);
 
     for (final lifecycleState in [
-      AppLifecycleState.inactive,
+      AppLifecycleState.hidden,
       AppLifecycleState.paused,
       AppLifecycleState.detached,
     ]) {
@@ -103,6 +138,28 @@ void main() {
 
     expect(controller.stopCalls, 3);
     expect(controller.startCalls, 4);
+  });
+
+  testWidgets('keeps the camera running through inactive', (tester) async {
+    // `inactive` covers transient system UI - most notably the camera
+    // permission prompt shown the first time this page opens - that
+    // overlays the app without backgrounding it. Tearing the scanner down
+    // here previously raced camera setup against that prompt and could
+    // leave the scanner dead for the rest of the session.
+    final controller = _FakeScannerController();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: QrScannerPage(scannerController: controller, onAccepted: (_) {}),
+      ),
+    );
+    expect(controller.startCalls, 1);
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    await tester.pump();
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pump();
+
+    expect(controller.stopCalls, 0);
   });
 
   testWidgets('never restarts after submission or dispose', (tester) async {
@@ -150,6 +207,37 @@ void main() {
     await tester.pump();
 
     expect(controller.disposeCalls, 1);
+  });
+
+  group('ZxingPairingScannerController', () {
+    // These exercise the real ZXing wiring - the fake used above stands in
+    // for it everywhere else - so a regression in how the controller talks
+    // to `ReaderWidget` (wrong widget, wrong callback shape, a state class
+    // that never notifies) fails a test instead of only showing up on a
+    // real device. No platform channels are mocked here, so the widget
+    // never reaches a live camera; it only proves the surface it mounts is
+    // the real ZXing scanner and that it responds to start/stop.
+    testWidgets('mounts the real ZXing scanner surface only while running', (
+      tester,
+    ) async {
+      final controller = ZxingPairingScannerController();
+      addTearDown(controller.dispose);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(body: controller.buildScanner(onDetected: (_) {})),
+        ),
+      );
+      expect(find.byType(ReaderWidget), findsNothing);
+
+      await controller.start();
+      await tester.pump();
+      expect(find.byType(ReaderWidget), findsOneWidget);
+
+      await controller.stop();
+      await tester.pump();
+      expect(find.byType(ReaderWidget), findsNothing);
+    });
   });
 }
 
