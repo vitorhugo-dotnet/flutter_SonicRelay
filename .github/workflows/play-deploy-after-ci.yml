@@ -21,4 +21,9 @@ jobs:
       - name: Trigger Android Play Deploy workflow
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh workflow run android-play-deploy.yml --repo "$GITHUB_REPOSITORY" --ref main
+          CI_RUN_NUMBER: ${{ github.event.workflow_run.run_number }}
+        run: |
+          gh workflow run android-play-deploy.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref main \
+            -f build_number="$CI_RUN_NUMBER"
