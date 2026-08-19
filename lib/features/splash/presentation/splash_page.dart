@@ -265,7 +265,7 @@ class _LoadingIndicator extends StatelessWidget {
         ),
         const SizedBox(height: AppSpacing.sm),
         const Text(
-          'v1.2.0 · WebRTC + Opus',
+          'v1.4.0 · WebRTC + Opus',
           style: TextStyle(
             fontSize: 11,
             color: _versionTextColor,

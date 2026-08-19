@@ -1,7 +1,13 @@
 <en-US>
-- Fixed the pairing QR scanner: it could fail to detect a code the first time you scanned, and invalid codes now show a clear error instead of doing nothing.
+- Fixed the pairing QR scanner: it could fail to detect a code on the first scan, and invalid codes now show a clear error instead of doing nothing.
+- 📻 Public Radio is now available directly on the Pairing screen—listen instantly, with no need for an editor, QR code, or pairing.
+- Added a true light mode! Choose System, Light, or Dark in Settings > Appearance—your choice is saved and applied instantly throughout the app.
+- Added a True Light Mode! Choose System, Light, or Dark in Settings > Appearance—your choice is saved and applied instantly throughout the app.
 </en-US>
 
 <pt-BR>
 - Corrigido o leitor de QR de pareamento: ele podia falhar ao detectar um código na primeira leitura, e códigos inválidos agora mostram um erro claro em vez de não fazer nada.
-</pt-BR>
+- 📻 Public Radio is now available right from the Pair device screen — listen instantly, no publisher, QR code, or pairing needed.
+- Added a real Light Mode! Choose System, Light, or Dark in Settings > Appearance — your pick is saved and applied instantly across the app.
+- Adicionado um Modo Claro de verdade! Escolha Sistema, Claro ou Escuro em Configurações > Aparência — sua escolha é salva e aplicada na hora em todo o app.
+</en-US>
