@@ -88,10 +88,25 @@ void main() {
 
   test('unpaired device is still redirected away from other pages', () {
     expect(
-      _redirect(const DeviceReadinessState.pairingRequired(), '/listener'),
+      _redirect(const DeviceReadinessState.pairingRequired(), '/join'),
       '/pair',
     );
   });
+
+  test(
+    'unpaired device can still reach the session flow the Public Radio entry point on '
+    '/pair joins into, since that join auto-pairs server-side without a local DevicePairing',
+    () {
+      expect(
+        _redirect(const DeviceReadinessState.pairingRequired(), '/session/waiting'),
+        isNull,
+      );
+      expect(
+        _redirect(const DeviceReadinessState.pairingRequired(), '/listener'),
+        isNull,
+      );
+    },
+  );
 
   group('first-use onboarding gate', () {
     test('an unpaired device with pending onboarding is sent there first', () {

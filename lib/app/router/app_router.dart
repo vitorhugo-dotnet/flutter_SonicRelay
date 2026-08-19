@@ -40,7 +40,18 @@ String? deviceIdentityRedirect(
         return location == '/onboarding' ? null : '/onboarding';
       }
       if (readiness.status == DeviceReadinessStatus.pairingRequired) {
-        return location == '/pair' ? null : '/pair';
+        // /session/waiting and /listener must stay reachable too: the Public Radio entry
+        // point on /pair joins a session (and, server-side, auto-pairs the device) without
+        // ever going through a real DevicePairing, so this device can still be
+        // pairingRequired locally when it navigates into the session flow. /join stays
+        // gated — the public-radio join skips it entirely and goes straight to
+        // /session/waiting, so nothing needs it reachable here.
+        const allowedWhilePairingRequired = {
+          '/pair',
+          '/session/waiting',
+          '/listener',
+        };
+        return allowedWhilePairingRequired.contains(location) ? null : '/pair';
       }
       if (location == '/loading' ||
           location == '/device-setup' ||
