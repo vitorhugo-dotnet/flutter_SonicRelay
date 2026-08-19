@@ -28,7 +28,14 @@ String? deviceIdentityRedirect(
       // left no way to fix it from inside the app. The restoring/deviceSetup branches are
       // deliberately unchanged — before a device credential exists there is no authenticated
       // client for Settings to talk to, and _DeviceSetupPage already owns that retry path.
-      return location == '/pair' || location == '/settings' ? null : '/pair';
+      //
+      // /session/waiting and /listener must stay reachable too: the Public Radio entry point
+      // on /pair joins a session (and, server-side, auto-pairs the device) without ever going
+      // through a real DevicePairing, so this device can still be pairingRequired locally when
+      // it navigates into the session flow. /join stays gated — the public-radio join skips it
+      // entirely and goes straight to /session/waiting, so nothing needs it reachable here.
+      const allowed = {'/pair', '/settings', '/session/waiting', '/listener'};
+      return allowed.contains(location) ? null : '/pair';
     case DeviceReadinessStatus.ready:
       if (location == '/loading' || location == '/device-setup') {
         return '/join';

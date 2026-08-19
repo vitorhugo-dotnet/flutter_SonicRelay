@@ -93,11 +93,32 @@ void main() {
     expect(
       deviceIdentityRedirect(
         const DeviceReadinessState.pairingRequired(),
-        '/listener',
+        '/join',
       ),
       '/pair',
     );
   });
+
+  test(
+    'unpaired device can still reach the session flow the Public Radio entry point on '
+    '/pair joins into, since that join auto-pairs server-side without a local DevicePairing',
+    () {
+      expect(
+        deviceIdentityRedirect(
+          const DeviceReadinessState.pairingRequired(),
+          '/session/waiting',
+        ),
+        isNull,
+      );
+      expect(
+        deviceIdentityRedirect(
+          const DeviceReadinessState.pairingRequired(),
+          '/listener',
+        ),
+        isNull,
+      );
+    },
+  );
 }
 
 class _ReadyReadinessNotifier extends DeviceReadinessNotifier {

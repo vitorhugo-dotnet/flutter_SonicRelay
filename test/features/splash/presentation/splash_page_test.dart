@@ -12,7 +12,7 @@ void main() {
 
     expect(find.text('SonicRelay'), findsOneWidget);
     expect(find.text('SEU PC TOCA · SEU CELULAR OUVE'), findsOneWidget);
-    expect(find.text('v1.1.0 · WebRTC + Opus'), findsOneWidget);
+    expect(find.text('v1.2.0 · WebRTC + Opus'), findsOneWidget);
   });
 
   testWidgets(

@@ -5,6 +5,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../app/di/app_providers.dart';
+import '../../../app/theme/app_spacing.dart';
+import '../../sessions/presentation/join_session_view_model.dart';
+import '../../sessions/presentation/widgets/public_room_card.dart';
+import '../../sessions/presentation/widgets/session_status_card.dart';
 import 'pairing_view_model.dart';
 import 'qr_scanner_page.dart';
 
@@ -33,7 +37,17 @@ class _PairingPageState extends ConsumerState<PairingPage> {
     final state = ref.watch(pairingViewModelProvider);
     final viewModel = ref.read(pairingViewModelProvider.notifier);
     final isReady =
-        ref.watch(deviceReadinessProvider).status == DeviceReadinessStatus.ready;
+        ref.watch(deviceReadinessProvider).status ==
+        DeviceReadinessStatus.ready;
+    final joinState = ref.watch(joinSessionViewModelProvider);
+    // Public Radio joins straight from this screen, without ever visiting /join, so this page
+    // owns the same navigate-on-joined listener join_session_page.dart uses for its own taps.
+    ref.listen(joinSessionViewModelProvider, (previous, next) {
+      if (previous?.status != JoinSessionStatus.joined &&
+          next.status == JoinSessionStatus.joined) {
+        context.go('/session/waiting');
+      }
+    });
 
     return Scaffold(
       appBar: AppBar(
@@ -63,6 +77,31 @@ class _PairingPageState extends ConsumerState<PairingPage> {
         child: ListView(
           padding: const EdgeInsets.all(20),
           children: [
+            Text(
+              'Listen without pairing',
+              style: Theme.of(context).textTheme.headlineSmall,
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'No publisher yet? Join the always-on Public Radio stream instantly — '
+              'no QR code, challenge ID, or pairing code needed.',
+            ),
+            const SizedBox(height: 20),
+            const PublicRoomCard(),
+            if (joinState.retryPublicRoomSessionId != null &&
+                joinState.status == JoinSessionStatus.failed)
+              if (joinState.errorMessage case final message?) ...[
+                const SizedBox(height: AppSpacing.md),
+                SessionStatusCard(
+                  message: message,
+                  onRetry: joinState.canRetry
+                      ? ref.read(joinSessionViewModelProvider.notifier).retry
+                      : null,
+                ),
+              ],
+            const SizedBox(height: 28),
+            const Divider(),
+            const SizedBox(height: 20),
             Text(
               'Pair with a publisher',
               style: Theme.of(context).textTheme.headlineSmall,
