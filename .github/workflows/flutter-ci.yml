@@ -9,6 +9,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ci-cd-${{ github.ref }}
+  cancel-in-progress: false
+
 env:
   FLUTTER_VERSION: "3.47.0"
   ANDROID_VERSION_CODE_OFFSET: "100000"

@@ -34,6 +34,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: android-play-deploy
+  cancel-in-progress: false
+
 env:
   FLUTTER_VERSION: "3.47.0"
   ANDROID_PACKAGE_NAME: "com.vitorhugo.sonicrelay.sonic_relay"
