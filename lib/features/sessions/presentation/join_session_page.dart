@@ -11,6 +11,7 @@ import '../../../core/widgets/sonic_card.dart';
 import '../../support/presentation/widgets/support_project_card.dart';
 import 'join_session_view_model.dart';
 import 'widgets/discovered_sessions_list.dart';
+import 'widgets/public_room_card.dart';
 import 'widgets/session_code_input.dart';
 import 'widgets/session_status_card.dart';
 
@@ -26,6 +27,7 @@ class JoinSessionPage extends ConsumerWidget {
     final hasDiscoveredSessions =
         (ref.watch(discoverableSessionsProvider).value ?? const [])
             .isNotEmpty;
+    final hasPublicRoom = ref.watch(publicRoomProvider).value?.enabled ?? false;
     ref.listen(joinSessionViewModelProvider, (previous, next) {
       if (previous?.status != JoinSessionStatus.joined &&
           next.status == JoinSessionStatus.joined) {
@@ -112,6 +114,10 @@ class JoinSessionPage extends ConsumerWidget {
                       ],
                     ),
                   ),
+                  if (hasPublicRoom) ...[
+                    const SizedBox(height: AppSpacing.md),
+                    const PublicRoomCard(),
+                  ],
                   if (hasDiscoveredSessions) ...[
                     const SizedBox(height: AppSpacing.md),
                     const DiscoveredSessionsList(),

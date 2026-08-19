@@ -16,6 +16,7 @@ class JoinSessionState {
     this.session,
     this.retryable = false,
     this.retryTarget,
+    this.retryPublicRoomSessionId,
   });
 
   final String code;
@@ -29,6 +30,11 @@ class JoinSessionState {
   /// on retry, or null when the failure came from the manual code path (retry re-reads
   /// [code] instead). Set alongside [retryable] whenever a discovered-session join fails.
   final DiscoverableSession? retryTarget;
+
+  /// The public room session id a failed [JoinSessionViewModel.joinPublicRoom] should
+  /// re-attempt on retry. Mutually exclusive with [retryTarget] — the public room has no
+  /// [DiscoverableSession] (it isn't in that list; see [PublicRoomInfo]).
+  final String? retryPublicRoomSessionId;
 
   bool get isJoining => status == JoinSessionStatus.joining;
   bool get canRetry => status == JoinSessionStatus.failed && retryable;
@@ -92,10 +98,13 @@ class JoinSessionViewModel extends Notifier<JoinSessionState> {
     }
   }
 
-  /// Retries whichever path last failed: a discovered-session tap re-attempts that same
-  /// session (there is no code to re-read for it), everything else re-reads [state.code]
-  /// through [join].
+  /// Retries whichever path last failed: the public room re-attempts its session id, a
+  /// discovered-session tap re-attempts that same session (there is no code to re-read for
+  /// either), everything else re-reads [state.code] through [join].
   Future<void> retry() {
+    if (state.retryPublicRoomSessionId case final sessionId?) {
+      return joinPublicRoom(sessionId);
+    }
     final target = state.retryTarget;
     return target != null ? joinDiscovered(target) : join();
   }
@@ -126,11 +135,41 @@ class JoinSessionViewModel extends Notifier<JoinSessionState> {
     }
   }
 
-  /// Shared failure handling for both [join] and [joinDiscovered], so the code path and the
-  /// tap-to-join path always report and recover from a given [SessionsFailureKind] the same
-  /// way. [retryTarget] should be the discovered session being retried, or null for the
-  /// manual code path.
-  void _applyFailure(SessionsFailure error, {DiscoverableSession? retryTarget}) {
+  Future<void> joinPublicRoom(String sessionId) async {
+    state = JoinSessionState(
+      code: state.code,
+      status: JoinSessionStatus.joining,
+      retryPublicRoomSessionId: sessionId,
+    );
+    try {
+      final joined = await _repository.joinById(sessionId);
+      state = JoinSessionState(
+        code: state.code,
+        status: JoinSessionStatus.joined,
+        session: joined,
+      );
+    } on SessionsFailure catch (error) {
+      _applyFailure(error, retryPublicRoomSessionId: sessionId);
+    } catch (_) {
+      state = JoinSessionState(
+        code: state.code,
+        status: JoinSessionStatus.failed,
+        errorMessage: 'Unable to join the session. Please retry.',
+        retryable: true,
+        retryPublicRoomSessionId: sessionId,
+      );
+    }
+  }
+
+  /// Shared failure handling for [join], [joinDiscovered], and [joinPublicRoom], so every
+  /// join path always reports and recovers from a given [SessionsFailureKind] the same way.
+  /// At most one of [retryTarget]/[retryPublicRoomSessionId] should be set, matching which
+  /// path is retrying; both null means the manual code path.
+  void _applyFailure(
+    SessionsFailure error, {
+    DiscoverableSession? retryTarget,
+    String? retryPublicRoomSessionId,
+  }) {
     var message = error.message;
     if (error.kind == SessionsFailureKind.unauthorized) {
       message = 'Your device identity is no longer authorized.';
@@ -146,6 +185,7 @@ class JoinSessionViewModel extends Notifier<JoinSessionState> {
           error.kind == SessionsFailureKind.missingDevice ||
           error.kind == SessionsFailureKind.invalidResponse,
       retryTarget: retryTarget,
+      retryPublicRoomSessionId: retryPublicRoomSessionId,
     );
   }
 }

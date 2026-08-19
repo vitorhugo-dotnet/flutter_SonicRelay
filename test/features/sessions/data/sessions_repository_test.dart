@@ -5,6 +5,7 @@ import 'package:sonic_relay/core/http/manual_retry_required_exception.dart';
 import 'package:sonic_relay/features/sessions/data/dto/discoverable_session.dart';
 import 'package:sonic_relay/features/sessions/data/dto/join_session_request.dart';
 import 'package:sonic_relay/features/sessions/data/dto/join_session_response.dart';
+import 'package:sonic_relay/features/sessions/data/dto/public_room_info.dart';
 import 'package:sonic_relay/features/sessions/data/sessions_api.dart';
 import 'package:sonic_relay/features/sessions/data/sessions_repository.dart';
 
@@ -27,12 +28,19 @@ class FakeSessionsApi implements SessionsApi {
     if (error case final value?) throw value;
     return const JoinSessionResponse(sessionId: 'session-1', status: 'waiting');
   }
+
+  @override
+  Future<PublicRoomInfo> getPublicRoom() async => const PublicRoomInfo.disabled();
 }
 
 class _StubSessionsApi implements SessionsApi {
-  _StubSessionsApi({required this.discoverable});
+  _StubSessionsApi({
+    this.discoverable = const [],
+    this.publicRoom = const PublicRoomInfo.disabled(),
+  });
 
   final List<DiscoverableSession> discoverable;
+  final PublicRoomInfo publicRoom;
 
   @override
   Future<JoinSessionResponse> join(JoinSessionRequest request) =>
@@ -44,6 +52,9 @@ class _StubSessionsApi implements SessionsApi {
 
   @override
   Future<List<DiscoverableSession>> discover() async => discoverable;
+
+  @override
+  Future<PublicRoomInfo> getPublicRoom() async => publicRoom;
 }
 
 class _ThrowingSessionsApi implements SessionsApi {
@@ -61,6 +72,9 @@ class _ThrowingSessionsApi implements SessionsApi {
 
   @override
   Future<List<DiscoverableSession>> discover() async => throw error;
+
+  @override
+  Future<PublicRoomInfo> getPublicRoom() async => throw error;
 }
 
 DioException dioFailure(int status, String code, {Object? error}) {
@@ -203,5 +217,38 @@ void main() {
     );
 
     expect(await repository.discover(), isEmpty);
+  });
+
+  test('getPublicRoom maps the backend payload', () async {
+    final repository = SessionsRepository(
+      api: _StubSessionsApi(
+        publicRoom: const PublicRoomInfo(
+          enabled: true,
+          sessionId: '22222222-2222-2222-2222-222222222222',
+          maxViewers: 20,
+        ),
+      ),
+      config: AppConfig.fromServerUrl('https://example.test'),
+    );
+
+    final info = await repository.getPublicRoom();
+
+    expect(info.enabled, isTrue);
+    expect(info.sessionId, '22222222-2222-2222-2222-222222222222');
+    expect(info.maxViewers, 20);
+  });
+
+  test('getPublicRoom returns disabled rather than throwing on failure', () async {
+    final repository = SessionsRepository(
+      api: _ThrowingSessionsApi(
+        DioException(requestOptions: RequestOptions(path: '/api/public-room')),
+      ),
+      config: AppConfig.fromServerUrl('https://example.test'),
+    );
+
+    final info = await repository.getPublicRoom();
+
+    expect(info.enabled, isFalse);
+    expect(info.sessionId, isNull);
   });
 }

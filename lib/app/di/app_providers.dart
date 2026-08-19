@@ -31,6 +31,7 @@ import '../../features/pairing/data/pairing_api.dart';
 import '../../features/pairing/data/pairing_repository.dart';
 import '../../features/pairing/domain/device_pairing.dart';
 import '../../features/sessions/data/dto/discoverable_session.dart';
+import '../../features/sessions/data/dto/public_room_info.dart';
 import '../../features/sessions/data/sessions_api.dart';
 import '../../features/sessions/data/sessions_repository.dart';
 import '../../features/listener/data/audio_receiver_service.dart';
@@ -479,6 +480,18 @@ final discoverableSessionsProvider =
   final repository = ref.watch(sessionsRepositoryProvider);
   while (true) {
     yield await repository.discover();
+    await Future<void>.delayed(const Duration(seconds: 5));
+  }
+});
+
+/// Polls the public radio room's availability while the join page is mounted. Fetching this
+/// also auto-pairs this device with the room server-side, so — unlike
+/// [discoverableSessionsProvider] — no prior manual pairing is ever required to see or join
+/// it (docs/superpowers/specs/2026-08-19-public-radio-room-design.md in dotnet_SonicRelay).
+final publicRoomProvider = StreamProvider.autoDispose<PublicRoomInfo>((ref) async* {
+  final repository = ref.watch(sessionsRepositoryProvider);
+  while (true) {
+    yield await repository.getPublicRoom();
     await Future<void>.delayed(const Duration(seconds: 5));
   }
 });

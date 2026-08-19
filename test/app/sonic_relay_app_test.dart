@@ -12,6 +12,7 @@ import 'package:sonic_relay/core/storage/relay_mode_storage.dart';
 import 'package:sonic_relay/core/webrtc/relay_modes.dart';
 import 'package:sonic_relay/core/webrtc/relay_settings_api.dart';
 import 'package:sonic_relay/features/listener/presentation/listener_page.dart';
+import 'package:sonic_relay/features/sessions/data/dto/public_room_info.dart';
 import 'package:sonic_relay/features/sessions/presentation/join_session_page.dart';
 import 'package:sonic_relay/features/settings/presentation/settings_page.dart';
 
@@ -55,6 +56,11 @@ ProviderScope testApp() => ProviderScope(
     // Avoids a real Dio call (and its dangling timer) when the join page mounts and watches
     // this provider eagerly.
     discoverableSessionsProvider.overrideWith((ref) => Stream.value(const [])),
+    // Avoids a real Dio call (and its dangling timer) when the join page mounts and watches
+    // this provider eagerly, same reasoning as discoverableSessionsProvider above.
+    publicRoomProvider.overrideWith(
+      (ref) => Stream.value(const PublicRoomInfo.disabled()),
+    ),
     relaySettingsApiProvider.overrideWithValue(_FakeRelaySettingsApi()),
   ],
   child: const SonicRelayApp(),
@@ -105,6 +111,9 @@ void main() {
             relayModeStorageProvider.overrideWithValue(_FakeRelayModeStorage()),
             discoverableSessionsProvider.overrideWith(
               (ref) => Stream.value(const []),
+            ),
+            publicRoomProvider.overrideWith(
+              (ref) => Stream.value(const PublicRoomInfo.disabled()),
             ),
             relaySettingsApiProvider.overrideWithValue(_FakeRelaySettingsApi()),
           ],
@@ -165,6 +174,9 @@ void main() {
         relayModeStorageProvider.overrideWithValue(_FakeRelayModeStorage()),
         discoverableSessionsProvider.overrideWith(
           (ref) => Stream.value(const []),
+        ),
+        publicRoomProvider.overrideWith(
+          (ref) => Stream.value(const PublicRoomInfo.disabled()),
         ),
         relaySettingsApiProvider.overrideWithValue(_FakeRelaySettingsApi()),
       ],
