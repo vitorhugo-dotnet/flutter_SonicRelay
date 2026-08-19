@@ -8,6 +8,7 @@ import '../../features/pairing/presentation/pairing_view_model.dart';
 import '../../features/sessions/presentation/join_session_page.dart';
 import '../../features/sessions/presentation/session_waiting_page.dart';
 import '../../features/settings/presentation/settings_page.dart';
+import '../../features/splash/presentation/splash_page.dart';
 import '../di/app_providers.dart';
 
 String? deviceIdentityRedirect(
@@ -44,8 +45,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
     routes: [
       GoRoute(
         path: '/loading',
-        builder: (context, state) =>
-            const Scaffold(body: Center(child: CircularProgressIndicator())),
+        builder: (context, state) => const SplashPage(),
       ),
       GoRoute(
         path: '/device-setup',
