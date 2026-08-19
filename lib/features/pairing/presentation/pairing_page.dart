@@ -53,6 +53,11 @@ class _PairingPageState extends ConsumerState<PairingPage> {
             : null,
         actions: [
           IconButton(
+            tooltip: 'How to use',
+            icon: const Icon(Icons.help_outline_rounded),
+            onPressed: () => context.push('/how-to-use'),
+          ),
+          IconButton(
             tooltip: 'Settings',
             icon: const Icon(Icons.settings_outlined),
             onPressed: () => context.push('/settings'),

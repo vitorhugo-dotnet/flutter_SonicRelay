@@ -5,6 +5,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../features/listener/presentation/listener_page.dart';
+import '../../features/onboarding/presentation/how_to_use_page.dart';
+import '../../features/onboarding/presentation/onboarding_page.dart';
 import '../../features/pairing/presentation/pairing_page.dart';
 import '../../features/pairing/presentation/pairing_view_model.dart';
 import '../../features/sessions/presentation/join_session_page.dart';
@@ -15,22 +17,34 @@ import '../di/app_providers.dart';
 
 String? deviceIdentityRedirect(
   DeviceReadinessState readiness,
-  String location,
-) {
+  String location, {
+  required bool onboardingCompleted,
+}) {
   switch (readiness.status) {
     case DeviceReadinessStatus.restoring:
       return location == '/loading' ? null : '/loading';
     case DeviceReadinessStatus.deviceSetup:
       return location == '/device-setup' ? null : '/device-setup';
     case DeviceReadinessStatus.pairingRequired:
-      // Settings must stay reachable here: it holds the server URL field, and a device
-      // pointed at the wrong backend can never pair, so redirecting Settings back to /pair
-      // left no way to fix it from inside the app. The restoring/deviceSetup branches are
-      // deliberately unchanged — before a device credential exists there is no authenticated
-      // client for Settings to talk to, and _DeviceSetupPage already owns that retry path.
-      return location == '/pair' || location == '/settings' ? null : '/pair';
     case DeviceReadinessStatus.ready:
-      if (location == '/loading' || location == '/device-setup') {
+      // Settings and How to use must stay reachable in both these states: Settings holds the
+      // server URL field, and a device pointed at the wrong backend can never pair, so
+      // redirecting Settings back to /pair left no way to fix it from inside the app. How to
+      // use is the permanent onboarding reference reachable from the pairing screen's "?"
+      // button, and must not be blocked by the first-use onboarding gate below. The
+      // restoring/deviceSetup branches are deliberately unchanged — before a device credential
+      // exists there is no authenticated client for Settings to talk to, and _DeviceSetupPage
+      // already owns that retry path.
+      if (location == '/settings' || location == '/how-to-use') return null;
+      if (!onboardingCompleted) {
+        return location == '/onboarding' ? null : '/onboarding';
+      }
+      if (readiness.status == DeviceReadinessStatus.pairingRequired) {
+        return location == '/pair' ? null : '/pair';
+      }
+      if (location == '/loading' ||
+          location == '/device-setup' ||
+          location == '/onboarding') {
         return '/join';
       }
       return null;
@@ -43,6 +57,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
     redirect: (context, state) => deviceIdentityRedirect(
       ref.read(deviceReadinessProvider),
       state.matchedLocation,
+      onboardingCompleted: ref.read(onboardingCompletedProvider),
     ),
     routes: [
       GoRoute(
@@ -69,6 +84,14 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/settings',
         builder: (context, state) => const SettingsPage(),
+      ),
+      GoRoute(
+        path: '/onboarding',
+        builder: (context, state) => const OnboardingPage(),
+      ),
+      GoRoute(
+        path: '/how-to-use',
+        builder: (context, state) => const HowToUsePage(),
       ),
     ],
   );
@@ -117,6 +140,9 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         next.status == PairingStatus.paired) {
       router.go('/join');
     }
+  });
+  ref.listen(onboardingCompletedProvider, (_, next) {
+    if (next) router.refresh();
   });
   ref.onDispose(() {
     splashHoldTimer?.cancel();

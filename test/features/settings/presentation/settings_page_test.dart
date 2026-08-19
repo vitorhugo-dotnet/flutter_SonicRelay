@@ -73,6 +73,14 @@ void main() {
     expect(find.text('Privacy policy'), findsOneWidget);
   });
 
+  testWidgets('the how-to-use entry is reachable before pairing', (tester) async {
+    // A user who has not paired yet is exactly the one most likely to need this
+    // explanation, so it must not sit behind the paired-only sections.
+    await _pumpSettings(tester, _PairingRequiredReadinessNotifier.new);
+
+    expect(find.text('How to use'), findsOneWidget);
+  });
+
   testWidgets('the donation card is reachable from settings', (tester) async {
     // Settings is where a user who already decided to support the project goes
     // looking, so the ask must not sit behind the paired-only sections.
