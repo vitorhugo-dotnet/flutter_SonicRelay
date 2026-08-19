@@ -5,6 +5,7 @@ import '../../../core/http/manual_retry_required_exception.dart';
 import '../domain/stream_session.dart';
 import 'dto/discoverable_session.dart';
 import 'dto/join_session_request.dart';
+import 'dto/public_room_info.dart';
 import 'sessions_api.dart';
 
 enum SessionsFailureKind {
@@ -62,6 +63,16 @@ class SessionsRepository {
       return await _api.discover();
     } catch (_) {
       return const [];
+    }
+  }
+
+  /// Best-effort, mirroring [discover]: a failure just means the public room card doesn't
+  /// show, not an error the user has to deal with.
+  Future<PublicRoomInfo> getPublicRoom() async {
+    try {
+      return await _api.getPublicRoom();
+    } catch (_) {
+      return const PublicRoomInfo.disabled();
     }
   }
 

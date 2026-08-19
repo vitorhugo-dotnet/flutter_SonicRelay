@@ -4,11 +4,13 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 import 'package:sonic_relay/app/di/app_providers.dart';
 import 'package:sonic_relay/features/sessions/data/dto/discoverable_session.dart';
+import 'package:sonic_relay/features/sessions/data/dto/public_room_info.dart';
 import 'package:sonic_relay/features/sessions/data/sessions_repository.dart';
 import 'package:sonic_relay/features/sessions/domain/stream_session.dart';
 import 'package:sonic_relay/features/sessions/presentation/join_session_page.dart';
 import 'package:sonic_relay/features/sessions/presentation/join_session_view_model.dart';
 import 'package:sonic_relay/features/sessions/presentation/widgets/discovered_sessions_list.dart';
+import 'package:sonic_relay/features/sessions/presentation/widgets/public_room_card.dart';
 import 'package:sonic_relay/features/support/presentation/widgets/support_project_card.dart';
 
 const _discoveredSession = DiscoverableSession(
@@ -19,12 +21,16 @@ const _discoveredSession = DiscoverableSession(
   maxViewers: 3,
 );
 
-Widget _wrap({List<DiscoverableSession> discoverable = const []}) {
+Widget _wrap({
+  List<DiscoverableSession> discoverable = const [],
+  PublicRoomInfo publicRoom = const PublicRoomInfo.disabled(),
+}) {
   return ProviderScope(
     overrides: [
       discoverableSessionsProvider.overrideWith(
         (ref) => Stream.value(discoverable),
       ),
+      publicRoomProvider.overrideWith((ref) => Stream.value(publicRoom)),
     ],
     child: const MaterialApp(home: JoinSessionPage()),
   );
@@ -52,6 +58,9 @@ class _FakeSessionsRepository implements SessionsRepository {
       signalingUrl: Uri.parse('wss://stream.example/ws/signaling'),
     );
   }
+
+  @override
+  Future<PublicRoomInfo> getPublicRoom() async => const PublicRoomInfo.disabled();
 }
 
 void main() {
@@ -86,6 +95,29 @@ void main() {
     expect(find.byType(DiscoveredSessionsList), findsNothing);
   });
 
+  testWidgets('shows the public room card when the room is enabled', (tester) async {
+    await tester.pumpWidget(
+      _wrap(
+        publicRoom: const PublicRoomInfo(
+          enabled: true,
+          sessionId: 'public-room-session-id',
+          maxViewers: 20,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byType(PublicRoomCard), findsOneWidget);
+    expect(find.text('Public Radio'), findsOneWidget);
+  });
+
+  testWidgets('hides the public room card when the room is disabled', (tester) async {
+    await tester.pumpWidget(_wrap());
+    await tester.pumpAndSettle();
+
+    expect(find.text('Public Radio'), findsNothing);
+  });
+
   testWidgets(
     'tapping a discovered session joins it by id and navigates to waiting',
     (tester) async {
@@ -107,6 +139,9 @@ void main() {
           overrides: [
             discoverableSessionsProvider.overrideWith(
               (ref) => Stream.value(const [_discoveredSession]),
+            ),
+            publicRoomProvider.overrideWith(
+              (ref) => Stream.value(const PublicRoomInfo.disabled()),
             ),
             sessionsRepositoryProvider.overrideWithValue(repository),
           ],

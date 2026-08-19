@@ -3,11 +3,13 @@ import 'package:dio/dio.dart';
 import 'dto/discoverable_session.dart';
 import 'dto/join_session_request.dart';
 import 'dto/join_session_response.dart';
+import 'dto/public_room_info.dart';
 
 abstract interface class SessionsApi {
   Future<JoinSessionResponse> join(JoinSessionRequest request);
   Future<List<DiscoverableSession>> discover();
   Future<JoinSessionResponse> joinById(String sessionId);
+  Future<PublicRoomInfo> getPublicRoom();
 }
 
 class DioSessionsApi implements SessionsApi {
@@ -39,5 +41,11 @@ class DioSessionsApi implements SessionsApi {
       '/api/sessions/$sessionId/join',
     );
     return JoinSessionResponse.fromJson(response.data!);
+  }
+
+  @override
+  Future<PublicRoomInfo> getPublicRoom() async {
+    final response = await _dio.get<Map<String, Object?>>('/api/public-room');
+    return PublicRoomInfo.fromJson(response.data!);
   }
 }

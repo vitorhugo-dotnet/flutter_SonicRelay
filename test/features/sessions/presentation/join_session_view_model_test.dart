@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sonic_relay/app/di/app_providers.dart';
 import 'package:sonic_relay/features/sessions/data/dto/discoverable_session.dart';
+import 'package:sonic_relay/features/sessions/data/dto/public_room_info.dart';
 import 'package:sonic_relay/features/sessions/data/sessions_repository.dart';
 import 'package:sonic_relay/features/sessions/domain/stream_session.dart';
 import 'package:sonic_relay/features/sessions/presentation/join_session_view_model.dart';
@@ -43,6 +44,9 @@ class FakeSessionsRepository implements SessionsRepository {
     if (failure case final value?) throw value;
     return joinedSession;
   }
+
+  @override
+  Future<PublicRoomInfo> getPublicRoom() async => const PublicRoomInfo.disabled();
 }
 
 class ReadyDeviceReadinessNotifier extends DeviceReadinessNotifier {
@@ -224,6 +228,45 @@ void main() {
 
       final state = container.read(joinSessionViewModelProvider);
       expect(repository.joinedSessionId, discoveredSession.sessionId);
+      expect(state.status, JoinSessionStatus.joined);
+      expect(state.session, same(joinedSession));
+    },
+  );
+
+  test('joinPublicRoom success exposes the joined session', () async {
+    final repository = FakeSessionsRepository();
+    final container = createContainer(repository);
+    addTearDown(container.dispose);
+    final viewModel = container.read(joinSessionViewModelProvider.notifier);
+
+    await viewModel.joinPublicRoom('public-room-session-id');
+
+    final state = container.read(joinSessionViewModelProvider);
+    expect(repository.joinedSessionId, 'public-room-session-id');
+    expect(state.session, same(joinedSession));
+    expect(state.status, JoinSessionStatus.joined);
+  });
+
+  test(
+    'a retryable joinPublicRoom failure retries the same session on retry()',
+    () async {
+      final repository = FakeSessionsRepository()
+        ..failure = const SessionsFailure(
+          SessionsFailureKind.network,
+          'Unable to join the session. Check your connection and retry.',
+        );
+      final container = createContainer(repository);
+      addTearDown(container.dispose);
+      final viewModel = container.read(joinSessionViewModelProvider.notifier);
+
+      await viewModel.joinPublicRoom('public-room-session-id');
+      expect(container.read(joinSessionViewModelProvider).canRetry, isTrue);
+
+      repository.failure = null;
+      await viewModel.retry();
+
+      final state = container.read(joinSessionViewModelProvider);
+      expect(repository.joinedSessionId, 'public-room-session-id');
       expect(state.status, JoinSessionStatus.joined);
       expect(state.session, same(joinedSession));
     },
