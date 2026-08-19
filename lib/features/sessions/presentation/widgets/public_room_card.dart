@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../app/di/app_providers.dart';
-import '../../../../app/theme/app_colors.dart';
 import '../../../../core/widgets/sonic_card.dart';
 import '../join_session_view_model.dart';
 
@@ -25,7 +24,10 @@ class PublicRoomCard extends ConsumerWidget {
           child: Material(
             type: MaterialType.transparency,
             child: ListTile(
-              leading: const Icon(Icons.radio_rounded, color: AppColors.accent),
+              leading: Icon(
+                Icons.radio_rounded,
+                color: Theme.of(context).colorScheme.primary,
+              ),
               title: const Text('Public Radio'),
               subtitle: Text('Tap to listen · up to ${info.maxViewers} listeners'),
               onTap: () => ref

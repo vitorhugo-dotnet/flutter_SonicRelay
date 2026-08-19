@@ -227,7 +227,14 @@ void main() {
       final readiness = container.read(deviceReadinessProvider);
       expect(readiness.status, DeviceReadinessStatus.deviceSetup);
       expect(readiness.requiresReset, isTrue);
-      expect(deviceIdentityRedirect(readiness, '/listener'), '/device-setup');
+      expect(
+        deviceIdentityRedirect(
+          readiness,
+          '/listener',
+          onboardingCompleted: true,
+        ),
+        '/device-setup',
+      );
 
       await expectLater(
         container.read(deviceIdentitySessionProvider).accessToken(),

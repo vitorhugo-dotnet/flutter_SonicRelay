@@ -2,8 +2,8 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
-import '../../../../app/theme/app_colors.dart';
 import '../../../../app/theme/app_spacing.dart';
+import '../../../../app/theme/sonic_colors.dart';
 
 /// An equalizer-style visualizer for the live audio signal. The bars animate
 /// while [active]; otherwise they settle into a dim, static preview.
@@ -72,7 +72,7 @@ class _AudioVisualizerState extends State<AudioVisualizer>
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
                     for (var i = 0; i < _barCount; i++)
-                      Expanded(child: _bar(i)),
+                      Expanded(child: _bar(context, i)),
                   ],
                 ),
               ),
@@ -83,7 +83,7 @@ class _AudioVisualizerState extends State<AudioVisualizer>
     );
   }
 
-  Widget _bar(int index) {
+  Widget _bar(BuildContext context, int index) {
     final base = _baseHeights[index];
     double factor = 1;
     if (widget.active) {
@@ -95,10 +95,13 @@ class _AudioVisualizerState extends State<AudioVisualizer>
       height: 96 * base * factor,
       margin: const EdgeInsets.symmetric(horizontal: 3),
       decoration: BoxDecoration(
-        gradient: const LinearGradient(
+        gradient: LinearGradient(
           begin: Alignment.bottomCenter,
           end: Alignment.topCenter,
-          colors: [AppColors.accent, Color(0xFF438BFF)],
+          colors: [
+            Theme.of(context).colorScheme.primary,
+            context.sonicColors.relay,
+          ],
         ),
         borderRadius: BorderRadius.circular(999),
       ),

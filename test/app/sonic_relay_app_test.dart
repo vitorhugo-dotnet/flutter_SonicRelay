@@ -9,6 +9,7 @@ import 'package:sonic_relay/app/sonic_relay_app.dart';
 import 'package:sonic_relay/core/diagnostics/sonic_log.dart';
 import 'package:dio/dio.dart';
 import 'package:sonic_relay/core/storage/relay_mode_storage.dart';
+import 'package:sonic_relay/core/storage/theme_mode_storage.dart';
 import 'package:sonic_relay/core/webrtc/relay_modes.dart';
 import 'package:sonic_relay/core/webrtc/relay_settings_api.dart';
 import 'package:sonic_relay/features/listener/presentation/listener_page.dart';
@@ -33,6 +34,20 @@ class _FakeRelayModeStorage extends RelayModeStorage {
   Future<void> write(String mode) async => stored = mode;
 }
 
+/// Avoids the real `FlutterSecureStorage` plugin, same reasoning as
+/// [_FakeRelayModeStorage].
+class _FakeThemeModeStorage extends ThemeModeStorage {
+  _FakeThemeModeStorage() : super(const FlutterSecureStorage());
+
+  ThemeMode stored = ThemeMode.system;
+
+  @override
+  Future<ThemeMode> read() async => stored;
+
+  @override
+  Future<void> write(ThemeMode mode) async => stored = mode;
+}
+
 /// Avoids a real Dio call (and its dangling timer) when the settings page
 /// mounts with a ready device and pulls the synced relay preferences.
 class _FakeRelaySettingsApi extends RelaySettingsApi {
@@ -49,10 +64,14 @@ class _FakeRelaySettingsApi extends RelaySettingsApi {
 ProviderScope testApp() => ProviderScope(
   overrides: [
     deviceReadinessProvider.overrideWith(_ReadyReadinessNotifier.new),
+    onboardingCompletedProvider.overrideWith(
+      () => OnboardingCompletedNotifier(true),
+    ),
     diagnosticsDirectoryProvider.overrideWithValue(
       _testDiagnosticsDirectory(),
     ),
     relayModeStorageProvider.overrideWithValue(_FakeRelayModeStorage()),
+    themeModeStorageProvider.overrideWithValue(_FakeThemeModeStorage()),
     // Avoids a real Dio call (and its dangling timer) when the join page mounts and watches
     // this provider eagerly.
     discoverableSessionsProvider.overrideWith((ref) => Stream.value(const [])),
@@ -67,13 +86,38 @@ ProviderScope testApp() => ProviderScope(
 );
 
 void main() {
-  testWidgets('uses a dark Material 3 theme', (tester) async {
+  testWidgets('wires a light and a dark Material 3 theme, defaulting to system', (
+    tester,
+  ) async {
     await tester.pumpWidget(testApp());
     await tester.pumpAndSettle();
 
     final materialApp = tester.widget<MaterialApp>(find.byType(MaterialApp));
     expect(materialApp.theme?.useMaterial3, isTrue);
-    expect(materialApp.theme?.brightness, Brightness.dark);
+    expect(materialApp.theme?.brightness, Brightness.light);
+    expect(materialApp.darkTheme?.useMaterial3, isTrue);
+    expect(materialApp.darkTheme?.brightness, Brightness.dark);
+    expect(materialApp.themeMode, ThemeMode.system);
+  });
+
+  testWidgets('selecting Light in Settings switches the active theme immediately', (
+    tester,
+  ) async {
+    await tester.pumpWidget(testApp());
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('Settings'));
+    await tester.pumpAndSettle();
+    expect(find.text('Appearance'), findsOneWidget);
+
+    await tester.ensureVisible(find.text('Light'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Light'));
+    await tester.pumpAndSettle();
+
+    final materialApp = tester.widget<MaterialApp>(find.byType(MaterialApp));
+    expect(materialApp.themeMode, ThemeMode.light);
+    expect(Theme.of(tester.element(find.text('Appearance'))).brightness, Brightness.light);
   });
 
   testWidgets('startup opens device-first join without any account UI', (
@@ -168,6 +212,9 @@ void main() {
     final container = ProviderContainer(
       overrides: [
         deviceReadinessProvider.overrideWith(_ReadyReadinessNotifier.new),
+        onboardingCompletedProvider.overrideWith(
+          () => OnboardingCompletedNotifier(true),
+        ),
         diagnosticsDirectoryProvider.overrideWithValue(
           _testDiagnosticsDirectory(),
         ),

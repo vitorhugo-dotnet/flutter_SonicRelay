@@ -180,6 +180,41 @@ void main() {
     expect(find.text('Settings page'), findsOneWidget);
   });
 
+  testWidgets('exposes a how-to-use entry point that opens /how-to-use', (
+    tester,
+  ) async {
+    final repository = _FakePairingRepository();
+    final router = GoRouter(
+      initialLocation: '/pair',
+      routes: [
+        GoRoute(path: '/pair', builder: (_, _) => const PairingPage()),
+        GoRoute(
+          path: '/how-to-use',
+          builder: (_, _) => const Scaffold(body: Text('How to use page')),
+        ),
+      ],
+    );
+    addTearDown(router.dispose);
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          pairingRepositoryProvider.overrideWithValue(repository),
+          currentPairingDeviceIdProvider.overrideWithValue(() async => null),
+          publicRoomProvider.overrideWith(
+            (ref) => Stream.value(const PublicRoomInfo.disabled()),
+          ),
+        ],
+        child: MaterialApp.router(routerConfig: router),
+      ),
+    );
+
+    await tester.tap(find.byTooltip('How to use'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('How to use page'), findsOneWidget);
+  });
+
   testWidgets(
     'shows the Public Radio card on the pairing screen before any pairing exists',
     (tester) async {
