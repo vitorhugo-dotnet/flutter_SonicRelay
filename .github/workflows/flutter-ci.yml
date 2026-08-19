@@ -241,6 +241,20 @@ jobs:
           mv dist/app-play-release.apk "dist/sonic-relay-${{ needs.version.outputs.tag }}.apk"
           mv dist/app-play-release.aab "dist/sonic-relay-${{ needs.version.outputs.tag }}.aab"
 
+      - name: Extract changelog for this release
+        id: changelog
+        shell: bash
+        run: |
+          NOTES_FILE="dist/release-notes.md"
+          sed -E '/^<\/[^>]+>$/d; s/^<([^>]+)>$/### \1/' CHANGELOG.xml > "$NOTES_FILE"
+
+          if [[ ! -s "$NOTES_FILE" ]] || ! grep -q '^### en-US$' "$NOTES_FILE"; then
+            echo "CHANGELOG.xml is missing or could not be converted to GitHub Release Markdown." >&2
+            exit 1
+          fi
+
+          echo "notes_file=$NOTES_FILE" >> "$GITHUB_OUTPUT"
+
       - name: Persist release version in pubspec.yaml
         id: persist_version
         shell: bash
@@ -296,10 +310,10 @@ jobs:
           tag_name: ${{ needs.version.outputs.tag }}
           name: ${{ needs.version.outputs.tag }}
           target_commitish: ${{ steps.persist_version.outputs.sha }}
+          body_path: ${{ steps.changelog.outputs.notes_file }}
           files: |
             dist/sonic-relay-${{ needs.version.outputs.tag }}.apk
             dist/sonic-relay-${{ needs.version.outputs.tag }}.aab
-          generate_release_notes: true
 
   deploy-play:
     name: Deploy Google Play internal testing
