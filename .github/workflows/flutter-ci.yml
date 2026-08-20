@@ -147,6 +147,15 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
+      # F-Droid's build server applies the same patch when rebuilding from
+      # source to verify Reproducible Builds; without it here too, the two
+      # builds' build-id notes diverge and the byte-for-byte comparison
+      # never matches.
+      - name: Strip build-id from native libs for reproducible builds
+        run: |
+          sed -i -e '1a add_link_options("LINKER:--build-id=none")' $HOME/.pub-cache/hosted/pub.dev/flutter_zxing-*/*/CMakeLists.txt
+          sed -i -e '/^project(/a add_link_options("LINKER:--build-id=none")' $HOME/.pub-cache/hosted/pub.dev/jni-*/src/CMakeLists.txt
+
       - name: Validate signing secrets
         if: github.event_name == 'push'
         env:
