@@ -74,6 +74,13 @@ android {
                 }
         }
     }
+
+    // F-Droid's APK scanner rejects the "Dependency metadata" signing block
+    // AGP embeds by default (a Play-only dependency-transparency feature).
+    dependenciesInfo {
+        includeInApk = false
+        includeInBundle = false
+    }
 }
 
 // Each ABI split gets its own versionCode so a single release can publish one
